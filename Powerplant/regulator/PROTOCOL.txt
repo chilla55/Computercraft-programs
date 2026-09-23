@@ -1,0 +1,83 @@
+POWER PLANT REGULATOR PROTOCOL v1
+Protocol string: powerplant.regulator.v1
+
+SETUP
+Run configure. Keep nominal target 2640. Set masterId to your master computer's
+ID and modem to back (or its actual name). masterId=-1 retains standalone mode.
+Gauge 7 stays after step-up and BEFORE breakers. The master needs an independent
+live GRID-side reading while this unit is disconnected. Do not use this unit's
+isolated output as the grid reading. This protocol is for the user's DC network.
+
+Each boot emits status every 0.5 s to the configured master. Read its node and
+session fields first. Send a fresh dispatch approximately every 0.5 s. The
+master must use increasing integer seq values for this session. On master reboot,
+read lastSeq from status and resume above it. On node reboot use its NEW session.
+All timestamps are os.epoch('utc') milliseconds. Grid samples expire after 2 s;
+dispatch lease expires after 3 s. send success is NOT breaker-close confirmation.
+Only status.breakers[1/2].closed reports actual contacts.
+
+MASTER -> UNIT: enable/heartbeat (Lua table)
+{
+ schema=1, type='dispatch', node=NODE_ID, session=SESSION_FROM_STATUS,
+ seq=NEXT_SEQUENCE, sentAt=os.epoch('utc'), enabled=true,
+ grid={voltage=MEASURED_GRID_VOLTS, healthy=GRID_HEALTH_BOOLEAN,
+       sampledAt=ACTUAL_GRID_SAMPLE_TIMESTAMP}
+}
+No runningTarget: nominal target is locally configured and remains 2640 V.
+A healthy live grid within the configured nominal range is required to join.
+A dead grid is not automatically black-started by managed mode.
+
+JOIN BEHAVIOUR
+1. Open both breakers and verify isolation.
+2. Detect shaft directions once per controller boot, without homing.
+3. Match the current grid reading, normally within 1 V, and recheck immediately
+   before each pole closes. The two contacts are sequential, not an atomic pair.
+4. Hold positions while natural sharing settles. Default: voltage changes <=1 V
+   and current changes <=0.25 A between samples for 3 s, with a 30 s timeout.
+5. Ramp the REGULATION SETPOINT toward the configured 2640 V at up to 1 V/s,
+   at most 1 V per update, waiting for the output to catch up. Actual shaft steps
+   and bus voltage are discrete and are not guaranteed to obey that slew rate.
+6. Continue normal regulation at nominal voltage. No separate current-sharing
+   controller or remote nominal-voltage override is used.
+
+MASTER -> UNIT: disable (repeat if ACK is not received)
+{schema=1,type='dispatch',node=NODE_ID,session=SESSION,seq=N,
+ sentAt=os.epoch('utc'),enabled=false}
+This opens both contacts and leaves the node online in standby. It does NOT
+stop the generator shaft or excitation. No such actuator is configured.
+
+FAULT RESET
+Send disable first. Then:
+{schema=1,type='reset',node=NODE_ID,session=SESSION,seq=N,
+ sentAt=os.epoch('utc')}
+Wait for standby with fault absent, THEN send fresh enable dispatches. Reset
+acceptance alone does not mean completed. Hardware faults stay latched even if
+normal enable heartbeats continue. Overvoltage/close failures retain at most 3
+retries per run/reset. Stale/unhealthy master data opens and waits for fresh
+healthy enable dispatches. No hardware fault can be bypassed by a master command.
+
+STATUS REQUEST (does not renew enable lease)
+{schema=1,type='get_status',node=NODE_ID,session=SESSION,seq=N,
+ sentAt=os.epoch('utc')}
+Periodic status supplies the response; ack only acknowledges the request.
+
+UNIT -> MASTER
+Every message: schema=1, node, session, sentAt.
+ack: seq, accepted, optional reason; acceptance means recorded intent only.
+status: phase, nominalTarget, target (temporary active setpoint), enabled, fault,
+ retries, minimumGeneratorVolts, inputVoltage, outputVoltage, grid, joinStage,
+ variacs[1..3]={position,ratio,shaftSpeed}, breakers[1..2]=native status, lastSeq.
+Missing readings are omitted if a peripheral is unavailable; never assume zero.
+Breaker 1 is plus; breaker 2 is minus. Current signs follow gauge orientation.
+joinStage: standalone, settling, ramping, nominal.
+fault/stopped: reason; stopped also includes breakersOpen verification result.
+
+SAFETY / NETWORK NOTES
+Disable, stale grid, lost dispatches or unhealthy grid interrupts motor waits
+and opens both contacts. An issued gearshift sequence can still finish after
+opening. Local overcurrent, overvoltage, input-voltage and position checks remain.
+These are cooperative CC tasks, not CPU threads. They yield during motor waits
+and long searches. Chunk unloading/computer shutdown still stops the software.
+Rednet is unauthenticated. ID/session/sequence checks reject accidental, replayed
+or misaddressed traffic but cannot authenticate a malicious sender. Use a trusted
+network; no cryptographic security is claimed.
