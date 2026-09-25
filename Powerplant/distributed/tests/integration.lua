@@ -368,23 +368,16 @@ nonlinear.untilTrue(function() return nonlinear.nodes[3].R.fresh('regulation')~=
 check(nonlinear.untilTrue(function() return nonlinear.nodes[2].R.state.phase=='live' end,120),'nonlinear startup corrections did not converge')
 check(nonlinear.maxStartupAttempt>3 and nonlinear.maxStartupAttempt<=12,'nonlinear fixture did not exercise extended correction budget')
 check(#nonlinear.nodes[2].R.state.startupMeasurements==nonlinear.maxStartupAttempt,'startup measurements missing')
-local diverging=world(nil,nil,{lowStart=true,oscillating=true})
+local unstableOptions={lowStart=true,oscillating=true}
+local diverging=world(nil,nil,unstableOptions)
 diverging.untilTrue(function() return diverging.nodes[3].R.fresh('regulation')~=nil end,3); diverging.command('start')
-check(diverging.untilTrue(function() return diverging.nodes[2].R.state.phase=='tripped' end,180),'nonconverging startup did not stop')
-check(diverging.maxStartupAttempt==12 and not diverging.contacts.plus and not diverging.contacts.minus,'correction limit or isolation failed')
-diverging.untilTrue(function() return false end,.5)
-local historyReason=false
-for _,event in ipairs(diverging.nodes[2].R.events) do if event.reason and event.reason:find('output history',1,true) then historyReason=true end end
-check(historyReason,'nonconverging startup did not record voltage history')
-local diagnostic
-for _,event in ipairs(diverging.nodes[2].R.events) do
- if event.detail and event.detail.startupMeasurements then diagnostic=event.detail.startupMeasurements end
-end
-check(diagnostic and #diagnostic==12,'startup measurement detail was not attached to trip')
-for _,sample in ipairs(diagnostic) do
- check(sample.outputBefore and sample.output and sample.input and sample.predicted,'missing electrical prediction diagnostic')
- for _,bank in ipairs(sample.banks) do check(bank.beforeDegrees and bank.commandDegrees and bank.targetDegrees and bank.actualDegrees,'missing movement diagnostic') end
-end
+check(diverging.untilTrue(function() return (diverging.maxStartupAttempt or 0)>35 end,300),'startup stopped at a fixed attempt budget')
+check(not diverging.contacts.plus and not diverging.contacts.minus,'unverified startup connected outputs')
+check(not diverging.nodes[2].files['/config/distributed-startup.json'],'failed tuning saved a preset')
+check(#diverging.nodes[2].R.state.startupMeasurements<=32,'unbounded startup history')
+unstableOptions.oscillating=false
+check(diverging.untilTrue(function() return diverging.nodes[2].R.state.phase=='live' end,120),'extended startup did not converge when source settled')
+check(diverging.nodes[2].files['/config/distributed-startup.json']~=nil,'extended startup did not save learned preset')
 -- An opening between the contact snapshot and gauge read is a contact fault,
 -- while genuinely low voltage with closed contacts still trips.
 direct.openOnInputRead=true
@@ -397,8 +390,11 @@ nonlinear.inputVoltage=0
 check(nonlinear.untilTrue(function() return nonlinear.nodes[3].R.state.latched and not nonlinear.contacts.input end,3),'real undervoltage did not trip')
 local unreachable=world(nil,nil,{lowStart=true,voltageScale=.5})
 unreachable.untilTrue(function() return unreachable.nodes[3].R.fresh('regulation')~=nil end,3); unreachable.command('start')
-check(unreachable.untilTrue(function() return unreachable.nodes[2].R.state.phase=='tripped' end,60),'unreachable startup did not trip')
+unreachable.untilTrue(function() return false end,60)
+check(not unreachable.nodes[2].R.state.latched,'unreachable startup did not keep waiting')
 check(not unreachable.contacts.plus and not unreachable.contacts.minus,'unverified voltage connected to output')
+unreachable.temperature.c1=140
+check(unreachable.untilTrue(function() return unreachable.nodes[3].R.state.latched and not unreachable.contacts.input end,1),'waiting startup stalled thermal protection')
 for _,temperature in ipairs({140,126}) do
  local hot=world(nil,nil,{lowStart=true,startupMoveTime=10})
  hot.untilTrue(function() return hot.nodes[3].R.fresh('regulation')~=nil end,3); hot.command('start')

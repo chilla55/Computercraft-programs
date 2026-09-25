@@ -153,7 +153,9 @@ function M.new(R)
     end
     local measurements={}
     R.state.startupMeasurements=measurements
-    for attempt=1,12 do
+    local attempt=0
+    while true do
+      attempt=attempt+1
       guard(false)
       assert(U.device(s.plusBreaker).isClosed()==false and U.device(s.minusBreaker).isClosed()==false,'Output must remain isolated during startup positioning')
       local before=U.stationaryBanks(s); U.aligned(s,before)
@@ -186,49 +188,53 @@ function M.new(R)
       else
         plan=P.initial(s,before,input,attempt>1 and output or nil,R.state.activeTarget,planningYield)
       end
-      assert(cached or fine or attempt>1 or plan.err<=s.fallbackVolts,('Startup target unreachable: predicted %.2f V, target %.2f V'):format(plan.predicted,R.state.activeTarget))
-      assert(plan.travel>0 and (attempt==1 or plan.err<err-.001),'Startup voltage cannot improve with measured corrections; check gauges, settling delay and ratios')
-      guard(false)
-      local checked=U.stationaryBanks(s); U.aligned(s,checked)
-      for i=1,3 do assert(checked[i].position==before[i].position,'Variac position changed during planning: stage '..i) end
-      R.state.startupPlan={positions=plan.positions,degrees=plan.degrees,predicted=plan.predicted,target=R.state.activeTarget,attempt=attempt}
-      local measurement={attempt=attempt,mode=plan==cached and 'cached' or fine and 'fine' or 'coarse',input=input,outputBefore=output,predicted=plan.predicted,target=R.state.activeTarget,banks={}}
-      for i=1,3 do
-        measurement.banks[i]={beforeDegrees=before[i].position*s.travelDegrees,commandDegrees=plan[i],targetDegrees=plan.degrees[i]}
-      end
-      measurements[#measurements+1]=measurement
-      if fine then
-        R.state.phase='fine_tuning'
-        apply(plan) -- Same sequential, lower-before-raise execution as live regulation.
+      if plan.travel==0 or (attempt>1 and plan.err>=err-.001) then
+        -- A discrete local minimum or changing input need not be a fault.
+        -- Keep the outputs isolated and resample without issuing blind moves.
+        R.state.phase='tuning'
+        R.state.startupPreset='Waiting for an improving startup setting'
+        pause(math.max(.5,s.settleSeconds or .2),false)
       else
-        R.state.phase='positioning'
-        local generation=R.state.generation
+        guard(false)
+        local checked=U.stationaryBanks(s); U.aligned(s,checked)
+        for i=1,3 do assert(checked[i].position==before[i].position,'Variac position changed during planning: stage '..i) end
+        R.state.startupPlan={positions=plan.positions,degrees=plan.degrees,predicted=plan.predicted,target=R.state.activeTarget,attempt=attempt}
+        local measurement={attempt=attempt,mode=plan==cached and 'cached' or fine and 'fine' or 'coarse',input=input,outputBefore=output,predicted=plan.predicted,target=R.state.activeTarget,banks={}}
         for i=1,3 do
-          if plan[i]~=0 then
-            assert(not R.state.latched and R.state.generation==generation,'Trip superseded startup movement')
-            U.device(s['gear'..string.char(64+i)]).rotate(math.abs(plan[i]),(plan[i]>0 and 1 or -1)*directions[i])
+          measurement.banks[i]={beforeDegrees=before[i].position*s.travelDegrees,commandDegrees=plan[i],targetDegrees=plan.degrees[i]}
+        end
+        if #measurements>=32 then table.remove(measurements,1) end
+        measurements[#measurements+1]=measurement
+        if fine then
+          R.state.phase='fine_tuning'
+          apply(plan) -- Same sequential, lower-before-raise execution as live regulation.
+        else
+          R.state.phase='positioning'
+          local generation=R.state.generation
+          for i=1,3 do
+            if plan[i]~=0 then
+              assert(not R.state.latched and R.state.generation==generation,'Trip superseded startup movement')
+              U.device(s['gear'..string.char(64+i)]).rotate(math.abs(plan[i]),(plan[i]>0 and 1 or -1)*directions[i])
+            end
+          end
+          sleep(.05)
+          settle(1,false)
+        end
+        local after=U.stationaryBanks(s); U.aligned(s,after)
+        for i,bank in ipairs(after) do measurement.banks[i].actualDegrees=bank.position*s.travelDegrees end
+        for i,bank in ipairs(after) do
+          for j,member in ipairs(bank.members) do
+            verifyMovement(i,member,before[i].members[j].position,plan[i],plan.positions[i])
           end
         end
-        sleep(.05)
-        settle(1,false)
-      end
-      local after=U.stationaryBanks(s); U.aligned(s,after)
-      for i,bank in ipairs(after) do measurement.banks[i].actualDegrees=bank.position*s.travelDegrees end
-      for i,bank in ipairs(after) do
-        for j,member in ipairs(bank.members) do
-          verifyMovement(i,member,before[i].members[j].position,plan[i],plan.positions[i])
-        end
-      end
-      R.state.phase='tuning'
-      pause(s.settleSeconds or .2,false)
-      output=U.voltage(s.outputGauge)
-      measurement.output=output
-      ready,output=verified(output)
-      if ready then return end
+        R.state.phase='tuning'
+        pause(s.settleSeconds or .2,false)
+        output=U.voltage(s.outputGauge)
+        measurement.output=output
+        ready,output=verified(output)
+        if ready then return end
+      end -- improving movement
     end
-    local history={}
-    for _,v in ipairs(measurements) do history[#history+1]=('%.2f'):format(v.output) end
-    error(('Startup voltage verification failed after 12 calculated plans: measured %.2f V, target %.2f V, input %.2f V; output history [%s]. Check input stability, settling delay, gauges and transformer ratios.'):format(output,R.state.activeTarget,input,table.concat(history,', ')))
   end
   local function diagnose()
     local test=R.state.diagnostic
