@@ -6,7 +6,7 @@ check(hash('')=='e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85
 check(hash('abc')=='ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad','abc SHA')
 check(hash(string.rep('a',1000))=='41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3','multi-block SHA')
 local manifest={schema=1,version='distributed-1.0.1',ref='distributed-1.0.1',files={}}
-local names={'app','common','runtime','protection','regulation','planner','ui','interface','updater','sha256','thermal_protection','transformer'}
+local names={'discovery','app','common','runtime','protection','regulation','planner','ui','interface','updater','sha256','thermal_protection','transformer'}
 local body='return '..string.format('%q',string.rep('x',9000))
 for _,name in ipairs(names) do manifest.files[name..'.lua']={size=#body,sha256=hash(body)} end
 local written={}; local receiver=Update.receiver(manifest,hash,function(name,data) written[name]=data end)

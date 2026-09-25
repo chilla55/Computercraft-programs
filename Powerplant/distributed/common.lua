@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.0.0',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.0',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 function M.finite(n) return type(n)=='number' and n==n and math.abs(n)<math.huge end
 function M.copy(v) if type(v)~='table' then return v end; local r={} for k,x in pairs(v) do r[k]=M.copy(x) end return r end
@@ -22,6 +22,7 @@ function M.write(path,value)
 end
 function M.validate(c)
   assert(type(c)=='table' and c.schema==1 and type(c.ids)=='table','Invalid cluster configuration')
+  if c.cluster~=nil then assert(type(c.cluster)=='string' and c.cluster:match('^[%w_-]+$'),'Invalid cluster name') end
   local ids={}; for _,role in ipairs(M.roles) do local id=c.ids[role]; assert(M.finite(id) and id>=0 and id%1==0 and not ids[id],'Unique computer IDs required'); ids[id]=true end
   assert(type(c.revision)=='number' and c.revision>=1 and c.revision%1==0,'Invalid configuration revision')
   local s=assert(c.settings,'Missing transformer settings')

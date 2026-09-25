@@ -6,11 +6,11 @@ This is the new three-computer system on `main`. The standalone v18 snapshot is 
 
 | Computer | Responsibility |
 |---|---|
-| UI/master | Configuration provider, local screen, target requests, incident history, GitHub updates |
+| UI/master | Configuration provider, portrait monitor, target requests, incident history, GitHub updates |
 | Regulation | Variac direction detection, bank homing, voltage planning and movement |
 | Protection/breaker master | Direct temperature/current/voltage/alignment checks; **the only role permitted to close breakers** |
 
-All three have direct wired-peripheral access and can immediately open every configured input/output breaker. Computer-to-computer messages use ender modems. Ender modems do not replace the wired connections needed to access peripherals. Run exactly one role per computer and stop the old regulator before commissioning.
+All three have direct wired-peripheral access and can immediately open every configured input/output breaker. Local computer-to-computer messages use the same wired modem network as the gauges and components. Only the UI computer needs an optional ender modem, reserved for future external-network communication; this release does not open it for local rednet. Run exactly one role per computer and stop the old regulator before commissioning.
 
 Trips happen before network reporting or disk writes. Every breaker receives an opening attempt even if another fails. Each computer stores a bounded persistent history and merges peer reports; multiple causes are retained, including explicit unknown openings. A delayed report can explain an unknown observation in the same operating cycle when its breaker-open command preceded the observation by at most two seconds. The original observation and every reported cause remain in the audit history; later trips are not assumed to have caused an earlier opening. Native contact commands remain sequential; this is not an atomic hardware safety interlock. Computers and peripherals must remain loaded to provide software protection.
 
@@ -27,7 +27,7 @@ install-transformer.lua
 
 The installer creates `transformer/` and verifies every file against the GitHub release manifest. It does not replace an existing installation or alter startup scripts. HTTP must be enabled and GitHub accessible. Alternatively, copy all top-level `.lua` files from this directory into `transformer/` using a disk.
 
-Leave your existing `dual-variac-config.json` in the **UI computer's root**. The initial master wizard imports that configuration, displays available peripherals and lets you assign the gauges, bank members, drives and input/output breakers. Enter keeps the saved default. An input breaker is mandatory. All contacts must be open and drives idle during commissioning. Choose the two worker computer IDs before starting them.
+Leave your existing `dual-variac-config.json` in the **UI computer's root**. The initial master wizard imports that configuration, displays available peripherals and lets you assign the gauges, bank members, drives and input/output breakers. Enter keeps the saved default. An input breaker is mandatory. All contacts must be open and drives idle during commissioning. Use a unique cluster name for each transformer. Start the configuration wizard on all three computers together, selecting that same name. Each advertises its role over wired rednet; the master discovers the workers and the workers discover the master. IDs are saved after commissioning; runtime does not silently replace a missing worker with another ID.
 
 On the UI computer:
 
@@ -36,7 +36,7 @@ transformer/transformer.lua configure master
 transformer/transformer.lua run
 ```
 
-With the UI running, on the regulation computer:
+On the regulation computer (start its wizard while the master wizard is discovering):
 
 ```text
 transformer/transformer.lua configure regulation
@@ -50,7 +50,7 @@ transformer/transformer.lua configure protection
 transformer/transformer.lua run
 ```
 
-Workers ask for the configured master ID and their own ender-modem peripheral name, then fetch their configuration over rednet. Each validates its assigned ID. Role settings and cached configuration are saved in `distributed-node.json` in the computer root. Each computer must see the configured peripheral names. Do not run these commands from different working directories later.
+Once the master wizard finishes, start its `run` command so the waiting worker wizards can fetch their configuration. The workers discover the master ID and use their selected wired modem. Each validates its assigned ID. Role settings and cached configuration are saved in `distributed-node.json` in the computer root. Each computer must see the configured peripheral names. Do not run these commands from different working directories later.
 
 Use **Resume/reset** on the UI or protection computer once temperatures are fresh and every variac is at or below 125 C. It verifies open contacts and idle drives, clears the thermal latch without replenishing curve credits, and creates a new operating cycle. Regulation then:
 
@@ -67,7 +67,7 @@ This first distributed release uses local single-mode regulation. The older plan
 
 ## UI and configuration
 
-No monitor is required. Every advanced computer can show its local status; configuration edits belong to the master. The screen uses cached readings and changed-row rendering. Tabs show the diagram, member positions/temperatures, gauges, supported settings and incident history. The source spark gap is labelled as **7,500 V generator protection**, not a software trip setting.
+The master wizard selects the connected UI monitor, or `-` for its computer screen. Use an **advanced monitor one block wide and two blocks high**, attached to the same wired network or directly to the UI computer. The program selects 0.5 text scale and a portrait layout automatically. Touch the left/right arrows to change pages and Up/Down to scroll. Emergency stop remains at the top; maintenance and reset remain at the bottom. Touch a setting, then type its value on the computer keyboard (Enter saves; Escape cancels). The full field name/value appears on the computer during editing. If the monitor disconnects, the UI falls back to the computer screen and returns when it reconnects. Worker computers retain their local status screens; configuration edits belong to the master. The screen uses cached readings and changed-row rendering. Tabs show the diagram, member positions/temperatures, gauges, supported settings and incident history. The source spark gap is labelled as **7,500 V generator protection**, not a software trip setting.
 
 - **Emergency stop / E:** trip directly from this computer, then report it. The button works while editing; the shortcut works outside text editing.
 - **Maintenance:** trip/latch all breakers open.
@@ -80,11 +80,15 @@ The temperature curve is the tested standalone policy: 125–126 C allows five s
 
 ## Automatic updates
 
-The master checks GitHub every five minutes when `autoUpdate` in its local `distributed-node.json` is not `false`. The manifest is on `main`; program files are fetched from its immutable, versioned tag. Version numbers are compared numerically. A disk drive is not required.
+The master checks GitHub every five minutes when `autoUpdate` in its local `distributed-node.json` is not `false`. The approval-capable manifest is `approved-release.json` on `main`; program files are fetched from its immutable, versioned tag. Version numbers are compared numerically. A disk drive is not required.
 
-Updates only install while the master verifies physical isolation and both workers report stopped. They never interrupt an operating transformer to force an update. A release is downloaded into a staging directory, checked for SHA-256 digest, exact byte length, approved filenames and Lua syntax, then sent to workers in **4 KiB chunks**. Each chunk/file operation has an acknowledgement and bounded retries; identical retransmissions are accepted. Missing/conflicting chunks or bad hashes cannot activate.
+Updates download and stage on all three computers while the current programs continue running. They never activate automatically. The UI displays **Ready**, with **Apply** and **Later** controls. Later retains the staged files; restarting also retains them but never retains approval. Apply requires maintenance, physically open contacts, idle drives and both workers stopped. A failed attempt consumes approval: press Apply again after resolving the reason. A release is downloaded into a staging directory, checked for SHA-256 digest, exact byte length, approved filenames and Lua syntax, then sent to workers in **4 KiB chunks**. Each chunk/file operation has an acknowledgement and bounded retries; identical retransmissions are accepted. Missing/conflicting chunks or bad hashes cannot activate.
 
-All participants must stage the full release before activation starts. Each recipient checks open contacts and idle drives again before changing `active-release.json`. The old files are retained. Reboots start latched, requiring explicit Resume/reset. Mixed versions cannot authorize breaker closure; the updater can retry a partially completed rollout, skipping workers already running the desired version.
+All participants must stage the full release before the operator can successfully activate it. Each recipient checks open contacts and idle drives again before changing `active-release.json`. The old files are retained. Reboots start latched, requiring explicit Resume/reset. Mixed versions cannot authorize breaker closure; the operator can approve a retry of a partially completed rollout; workers already running the desired version acknowledge it without replacing their rollback pointer.
+
+### Migrating from distributed 1.0.0
+
+The old `release.json` channel remains pinned to 1.0.0 because that version automatically activates updates without asking. It will **not** receive this change automatically. Explicitly stop the old programs and isolate the transformer, download the new installer, then run `install-transformer.lua transformer-v11` on all three computers. Use `transformer-v11/transformer.lua` for the configure/run commands above. Reconfigure all three for wired discovery; existing settings remain defaults. Keep the old installation for recovery and change any startup script to the new path deliberately. Do not run old and new workers together. Subsequent releases use staged files and UI approval.
 
 For offline recovery, isolate the transformer and run:
 
@@ -105,8 +109,10 @@ From the repository root:
 lua Powerplant/distributed/tests/core.lua
 lua Powerplant/distributed/tests/updates.lua
 lua Powerplant/distributed/tests/integration.lua
+lua Powerplant/distributed/tests/ui.lua
+lua Powerplant/distributed/tests/discovery.lua
 ```
 
 The integration fixture runs all three roles in separate Lua environments, with shared simulated peripherals, yielding native calls and CC-style event routing. It covers isolated bank homing, protection-only closure, UI loss, a hot follower, reset/restart, unknown contact opening and heartbeat loss even while hello messages still arrive. It does not model Minecraft's electrical or thermal physics.
 
-To publish the next release, increment `release` in `common.lua`, regenerate `release.json` with `python3 Powerplant/distributed/tools/build_release.py`, test the exact files, commit, and create the matching `distributed-X.Y.Z` tag at that commit. Push the tag before publishing the updated manifest on `main`. Never rewrite an existing release tag.
+To publish the next release, increment `release` in `common.lua`, regenerate `approved-release.json` with `python3 Powerplant/distributed/tools/build_release.py`, test the exact files, commit, and create the matching `distributed-X.Y.Z` tag at that commit. Push the tag before publishing the updated manifest on `main`. Never rewrite an existing release tag.

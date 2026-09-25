@@ -69,7 +69,7 @@ function M.new(config,node,modules,root)
   function R.heartbeat()
     while true do
       local ok=pcall(function()
-        if not rednet.isOpen(node.modem) then assert(U.device(node.modem).isWireless(),'Use an ender modem'); rednet.open(node.modem) end
+        if not rednet.isOpen(node.modem) then assert(U.device(node.modem).isWireless()==false,'Use the local wired modem'); rednet.open(node.modem) end
         R.publish('hello',{})
         if R.role=='master' then R.publish('config_offer',{config=config}) end
         -- Only bounded event tails go over the link; full history stays local.
@@ -77,7 +77,7 @@ function M.new(config,node,modules,root)
         for i=math.max(1,#R.events-7),#R.events do state.events[#state.events+1]=R.events[i] end
         R.publish('heartbeat',state)
       end)
-      if not ok and R.role~='master' and not R.state.latched then R.trip('modem_failure','Ender modem unavailable') end
+      if not ok and R.role~='master' and not R.state.latched then R.trip('modem_failure','Wired modem unavailable') end
       sleep(.25)
     end
   end

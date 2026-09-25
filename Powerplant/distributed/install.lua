@@ -37,9 +37,9 @@ local function get(url)
   local f,reason=http.get(url,nil,true); assert(f,reason)
   local data=f.readAll(); f.close(); return data
 end
-local manifest=assert(textutils.unserializeJSON(get(repository..'main/Powerplant/distributed/release.json')),'Invalid manifest')
+local manifest=assert(textutils.unserializeJSON(get(repository..'main/Powerplant/distributed/approved-release.json')),'Invalid manifest')
 assert(manifest.schema==1 and type(manifest.version)=='string' and manifest.version:match('^distributed%-%d+%.%d+%.%d+$') and manifest.ref==manifest.version,'Invalid release tag')
-local names={'app','common','runtime','protection','regulation','planner','ui','interface','updater','sha256','thermal_protection','transformer'}
+local names={'discovery','app','common','runtime','protection','regulation','planner','ui','interface','updater','sha256','thermal_protection','transformer'}
 local staging=directory..'-download'
 if fs.exists(staging) then fs.delete(staging) end
 fs.makeDir(staging)

@@ -1,7 +1,24 @@
 local M={}
 function M.run(R)
   local U,s=R.U,R.config.settings
-  local screen=R.modules.ui.new(term,colors)
+  local output,screen,width,height,dirty
+  dirty=true
+  local function selectOutput()
+    local target=term
+    if R.role=='master' and R.node.monitor then
+      local candidate=peripheral.wrap(R.node.monitor)
+      if candidate and candidate.setTextScale then target=candidate end
+    end
+    -- Peripheral wrappers are recreated by wrap; compare the selected name.
+    local name=target==term and 'terminal' or R.node.monitor
+    if name~=output then
+      output=name
+      if target~=term then target.setTextScale(0.5) end
+      width,height=target.getSize()
+      local proxy=setmetatable({getSize=function() return width,height end},{__index=target})
+      screen=R.modules.ui.new(proxy,colors)
+    else width,height=target.getSize() end
+  end
   local cache={phase=R.role,config=s,maintenance={},stages={},inputBreakers={},breakers={},voltages={},sourceMeters={},events=R.events}
   for _,k in ipairs({'input','output','source','preStepUp'}) do cache.voltages[k]={} end
   cache.sourceMeters.current={}; cache.sourceMeters.power={}
@@ -46,6 +63,10 @@ function M.run(R)
     if a.kind=='emergency' or a.kind=='maintenance' or a.kind=='stop' then
       R.trip(a.kind=='emergency' and 'emergency_stop' or 'operator_stop','Operator requested '..a.kind)
       if a.kind=='stop' then error('STOP',0) end
+    elseif a.kind=='update_apply' then
+      R.updater.approve(a.version)
+    elseif a.kind=='update_later' then
+      R.updater.defer(a.version)
     elseif a.kind=='resume' then
       if R.role=='master' then R.send('protection','start',{})
       elseif R.role=='protection' then R.commands[#R.commands+1]={kind='start',data={}}
@@ -64,15 +85,37 @@ function M.run(R)
     end
   end
   local function input()
-    screen.draw(cache)
     while true do
       local e={os.pullEvent()}
-      if e[1]=='distributed_ui' or e[1]=='term_resize' or e[1]=='mouse_click' or e[1]=='mouse_scroll' or e[1]=='char' or e[1]=='key' or e[1]=='paste' then
+      if e[1]=='monitor_touch' and e[2]==output then e={'mouse_click',1,e[3],e[4]}
+      elseif e[1]=='mouse_click' and output~='terminal' then e={} end
+      if screen then
         local a=screen.event(table.unpack(e))
         if a then local ok,why=pcall(action,a); if not ok then if why=='STOP' then error(why,0) end; R.state.message=tostring(why) end end
-        cache.message=R.state.message or R.state.updateMessage or ''; cache.events=R.events
-        screen.draw(cache)
       end
+      if e[1]~='timer' then dirty=true end
+    end
+  end
+  local function render()
+    local lastEdit
+    while true do
+      if dirty then
+        dirty=false
+        local ok,why=pcall(function()
+          selectOutput()
+          cache.message=R.state.message or R.state.updateMessage or ''; cache.events=R.events
+          cache.updateReady=R.state.updateReady; cache.updateDeferred=R.state.updateDeferred
+          cache.updateApplying=R.state.updateApplying; cache.updateCanApprove=R.role=='master'
+          screen.draw(cache)
+          if output~='terminal' then
+            local edit=screen.editing()
+            local text=edit and (edit.key..': '..edit.text..'\nEnter: save / Escape: cancel') or 'Transformer UI on '..output..'\nTouch monitor; type values here. E: emergency stop.'
+            if text~=lastEdit then term.clear(); term.setCursorPos(1,1); print(text); lastEdit=text end
+          end
+        end)
+        if not ok then R.state.message='Display: '..tostring(why); dirty=true; output=nil end
+      end
+      sleep(0.1)
     end
   end
   local function sample()
@@ -81,6 +124,6 @@ function M.run(R)
       os.queueEvent('distributed_ui'); sleep(1)
     end
   end
-  parallel.waitForAny(input,sample)
+  parallel.waitForAny(input,sample,render)
 end
 return M
