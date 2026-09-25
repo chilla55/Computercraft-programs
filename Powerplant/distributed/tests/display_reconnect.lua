@@ -8,7 +8,7 @@ local function scenario(configured,names)
  U={roles={},read=function() end,write=function(_,node) saved=node.monitor end},modules={ui={new=function(screen)
   selected=select(1,screen.getSize())
   return {draw=function() end,animating=function() return false end,editing=function() end,
-  event=function(event) if event=='mouse_click' then return {kind='emergency'} end end}
+  event=function(event) if event=='switch' then return {kind='display_switch'} end; if event=='mouse_click' then return {kind='emergency'} end end}
  end}}}
  local env=setmetatable({term=terminal,colors={},print=function() end,
  peripheral={getNames=function() return names end,hasType=function() return true end,
@@ -23,6 +23,12 @@ local R,saved,width,tasks,actions=scenario('old_monitor',{'new_monitor'})
 check(R.node.monitor=='new_monitor' and saved=='new_monitor' and width==57,'replacement monitor was not selected and saved')
 assert(coroutine.resume(tasks[1],'monitor_touch','new_monitor',1,1))
 check(actions[1]=='emergency_stop','touch events on replacement monitor did not reach UI')
+assert(coroutine.resume(tasks[1],'switch')); assert(coroutine.resume(tasks[3]))
+check(R.displayTerminal==true,'UI did not switch to terminal')
+assert(coroutine.resume(tasks[1],'monitor_touch','new_monitor',1,2))
+check(actions[2]=='emergency_stop','inactive monitor lost emergency stop')
+assert(coroutine.resume(tasks[1],'monitor_touch','new_monitor',1,4)); assert(coroutine.resume(tasks[3]))
+check(R.displayTerminal==false,'inactive monitor could not restore UI')
 R,saved,width=scenario(nil,{'new_monitor'})
 check(R.node.monitor==nil and saved==nil and width==51,'explicit headless mode was overridden')
 R,saved,width=scenario('old_monitor',{'one','two'})

@@ -93,11 +93,17 @@ for _,size in ipairs({{15,19},{15,29},{36,29},{57,29}}) do
  local keyboard=UI.new(screen,c); keyboard.draw(d)
  for _=1,3 do keyboard.event('mouse_click',1,w,w<45 and 3 or 2); keyboard.draw(d) end
  keyboard.event('mouse_click',1,1,w<45 and 5 or 3); keyboard.draw(d)
+ check(keyboard.editing().mode=='choose' and keyboard.editing().layout=='number','numeric input selector missing')
+ keyboard.event('mouse_click',1,1,7); keyboard.draw(d)
+ keyboard.event('mouse_click',1,1,6); keyboard.draw(d) -- full keyboard
  local kw=math.max(1,math.floor(w/10)); local stride=h>=25 and 2 or 1
  for _,index in ipairs({2,6,4,10}) do keyboard.event('mouse_click',1,1+(index-1)*kw,7) end
  local saved=keyboard.event('mouse_click',1,1,h-2)
  check(saved and saved.kind=='setting' and saved.key=='target' and saved.value=='2640','touch numeric entry failed')
  keyboard.draw(d); keyboard.event('mouse_click',1,1,w<45 and 5 or 3); keyboard.draw(d)
+ check(keyboard.editing().mode=='choose' and keyboard.editing().layout=='number','numeric input selector missing')
+ keyboard.event('mouse_click',1,1,7); keyboard.draw(d)
+ keyboard.event('mouse_click',1,1,6); keyboard.draw(d) -- full keyboard
  local controls=7+5*stride
  keyboard.event('mouse_click',1,1,controls); keyboard.draw(d) -- Shift
  keyboard.event('mouse_click',1,1,7+stride) -- Q
@@ -111,6 +117,25 @@ for _,size in ipairs({{15,19},{15,29},{36,29},{57,29}}) do
  keyboard.event('mouse_click',1,8,h-2)
  check(keyboard.editing()==nil and d.config.target==2640,'touch cancel changed setting')
 end
+w=57; h=29; d.config={target=2640}
+local keypad=UI.new(screen,c); keypad.draw(d)
+for _=1,3 do keypad.event('mouse_click',1,w,2); keypad.draw(d) end
+keypad.event('mouse_click',1,1,3); keypad.draw(d)
+keypad.event('mouse_click',1,1,7); keypad.draw(d)
+check(keypad.editing().layout=='number' and keypad.editing().mode=='virtual','numpad was not default for a numeric setting')
+keypad.event('mouse_click',1,1,7) -- 7
+keypad.event('mouse_click',1,7,7) -- 8
+check(keypad.editing().text=='78','numpad entry failed')
+keypad.event('mouse_click',1,7,6); keypad.draw(d)
+check(keypad.editing().mode=='terminal','terminal input choice failed')
+keypad.event('char','9')
+check(keypad.event('key',keys.enter).value=='789','terminal input did not preserve virtual entry')
+d.workerPassive=true; keypad.draw(d)
+check(keypad.event('mouse_click',1,1,2).kind=='emergency','passive worker lacks emergency stop')
+check(keypad.event('mouse_click',1,1,h-2)==nil,'passive worker exposed full controls')
+d.workerPassive=false; d.canSwitchDisplay=true; d.onTerminal=true; keypad.draw(d)
+check(keypad.event('mouse_click',1,1,h).kind=='display_switch','display switch button absent')
+d.canSwitchDisplay=nil
 w=15; h=29
 -- The renderer may yield in a monitor write without blocking touch input.
 local tasks,actions={},{}

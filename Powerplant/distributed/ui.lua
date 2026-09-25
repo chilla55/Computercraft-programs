@@ -49,6 +49,15 @@ function M.new(screen,c,clock)
       screen.setBackgroundColor(c.black); screen.clear(); lastRows={}; scrolling={}
       lastWidth,lastHeight=w,h
     end
+    if data.workerPassive then
+      editing=nil
+      put(1,1,string.upper(data.phase or 'WORKER'),c.cyan)
+      button(1,2,' E-STOP ',{kind='emergency'},c.red)
+      put(1,4,'Master connected',c.lightGray)
+      put(1,5,'Control from master monitor',c.lightGray)
+      if data.fault then put(1,7,'TRIP: '..data.fault,c.red) end
+      put(1,h,'Press E for emergency stop',c.lightGray)
+    else
     local compact=w<45
     if compact then
       put(1,1,string.upper(data.phase or 'TRANSFORMER'),c.cyan)
@@ -222,6 +231,7 @@ function M.new(screen,c,clock)
       end
     end
     end
+    if not editing and data.canSwitchDisplay then button(1,h,data.onTerminal and 'Use monitor' or 'Use terminal',{kind='display_switch'}) end
     if editing then
       -- Monitor-only editing: replace the page with a touch keyboard, keeping
       -- emergency stop reachable and never requiring the computer keyboard.
@@ -231,9 +241,20 @@ function M.new(screen,c,clock)
       put(1,3,editing.key,c.cyan)
       put(1,4,editing.text:sub(-w),c.yellow)
       put(1,5,editing.replace and 'Typing replaces value' or 'Typing appends',c.lightGray)
+      if editing.mode=='choose' then
+        button(1,7,'Touch keys',{kind='key_mode',mode='virtual'},c.blue)
+        button(1,9,'Terminal',{kind='key_mode',mode='terminal'})
+      elseif editing.mode=='terminal' then
+        put(1,7,'Type on terminal',c.lightGray)
+        button(1,9,'Touch keys',{kind='key_mode',mode='virtual'},c.blue)
+      else
+      button(1,6,editing.layout=='number' and 'ABC' or '123',{kind='key_layout'})
+      button(7,6,'Terminal',{kind='key_mode',mode='terminal'})
       local stride=h>=25 and 2 or 1
-      local keyWidth=math.max(1,math.floor(w/10))
-      for r,letters in ipairs({'1234567890','qwertyuiop','asdfghjkl','zxcvbnm','_-:.,/+=()'}) do
+      local number=editing.layout=='number'
+      local keyWidth=math.max(1,math.min(number and 6 or 100,math.floor(w/(number and 3 or 10))))
+      local rows=number and {'789','456','123','0.-','+eE'} or {'1234567890','qwertyuiop','asdfghjkl','zxcvbnm','_-:.,/+=()'}
+      for r,letters in ipairs(rows) do
         if editing.shift then letters=letters:upper() end
         for i=1,#letters do
           local char=letters:sub(i,i)
@@ -246,10 +267,13 @@ function M.new(screen,c,clock)
       button(7,controls,'Space',{kind='key_text',text=' '})
       button(1,controls+stride,'Del',{kind='key_delete'})
       button(6,controls+stride,'Clear',{kind='key_clear'})
+      end
       button(1,h-2,' Save ',{kind='key_save'},c.blue)
       button(8,h-2,'Cancel',{kind='key_cancel'})
+      if data.canSwitchDisplay then button(1,h-1,data.onTerminal and 'Use monitor' or 'Use terminal',{kind='display_switch'}) end
       statusLine(h)
     end
+    end -- full interface / passive worker
     -- Repaint only changed rows: periodic samples should not flash the screen
     -- or rewrite unchanged controls while the operator is typing.
     for y=1,h do
@@ -278,19 +302,21 @@ function M.new(screen,c,clock)
         elseif action.kind=='scroll' then offset=math.max(0,offset+action.delta)
         elseif action.kind=='tab' then tab=action.name; offset=0; editing=nil
         elseif action.kind=='maintenance' then tab='Maintenance'; offset=0; editing=nil; return action
+        elseif action.kind=='key_mode' then editing.mode=action.mode
+        elseif action.kind=='key_layout' then editing.layout=editing.layout=='number' and 'full' or 'number'
         elseif action.kind=='key_text' then editing.text=(editing.replace and '' or editing.text)..action.text; editing.replace=false
         elseif action.kind=='key_shift' then editing.shift=not editing.shift
         elseif action.kind=='key_delete' then editing.text=editing.replace and '' or editing.text:sub(1,-2); editing.replace=false
         elseif action.kind=='key_clear' then editing.text=''; editing.replace=false
         elseif action.kind=='key_cancel' then editing=nil
         elseif action.kind=='key_save' then local result={kind='setting',key=editing.key,value=editing.text}; editing=nil; return result
-        elseif action.kind=='edit' then editing={key=action.key,text=value(api.config[action.key]),replace=true}
+        elseif action.kind=='edit' then editing={key=action.key,text=value(api.config[action.key]),replace=true,mode='choose',layout=type(api.config[action.key])=='number' and 'number' or 'full'}
         else return action end
         return
       end end
     elseif event=='mouse_scroll' and not editing then offset=math.max(0,offset+a)
     elseif event=='char' then
-      if editing then editing.text=(editing.replace and '' or editing.text)..a; editing.replace=false
+      if editing then if editing.mode=='choose' then editing.mode='terminal' end; editing.text=(editing.replace and '' or editing.text)..a; editing.replace=false
       elseif a:lower()=='e' then return {kind='emergency'}
       elseif a:lower()=='q' then return {kind='stop'} end
     elseif event=='paste' and editing then editing.text=(editing.replace and '' or editing.text)..a; editing.replace=false
@@ -305,6 +331,8 @@ function M.new(screen,c,clock)
   end
   function api.animating() return animated end
   function api.editing() return editing end
+  function api.export() return {tab=tab,offset=offset,editing=editing} end
+  function api.restore(v) if v then tab=v.tab; offset=v.offset; editing=v.editing end end
   return api
 end
 return M

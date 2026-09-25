@@ -6,7 +6,7 @@ function M.run(R)
   local nextMonitorSearch=0
   local function selectOutput()
     local target=term
-    if R.role=='master' and R.node.monitor then
+    if R.role=='master' and R.node.monitor and not R.displayTerminal then
       local candidate=peripheral.wrap(R.node.monitor)
       if not (candidate and candidate.setTextScale) and R.now()>=nextMonitorSearch then
         nextMonitorSearch=R.now()+2000
@@ -30,7 +30,9 @@ function M.run(R)
       if target~=term then target.setTextScale(0.5) end
       width,height=target.getSize()
       local proxy=setmetatable({getSize=function() return width,height end},{__index=target})
+      local previous=screen and screen.export and screen.export()
       screen=R.modules.ui.new(proxy,colors)
+      if screen.restore then screen.restore(previous) end
     else width,height=target.getSize() end
   end
   local maintenanceQueue
@@ -100,6 +102,8 @@ function M.run(R)
     if a.kind=='emergency' or a.kind=='maintenance' or a.kind=='stop' then
       R.trip(a.kind=='emergency' and 'emergency_stop' or 'operator_stop','Operator requested '..a.kind)
       if a.kind=='stop' then error('STOP',0) end
+    elseif a.kind=='display_switch' then
+      assert(R.role=='master' and R.node.monitor,'No configured monitor'); R.displayTerminal=not R.displayTerminal; dirty=true
     elseif a.kind=='maintenance_test' then
       assert(R.role=='master' and not R.maintenanceBusy,'Maintenance test unavailable')
       assert(not R.state.updateApplying and not R.rebootRequested,'Update activation in progress')
@@ -132,6 +136,13 @@ function M.run(R)
   local function input()
     while true do
       local e={os.pullEvent()}
+      if e[1]=='monitor_touch' and e[2]==R.node.monitor and output=='terminal' then
+        if e[4]==2 and e[3]<=8 then R.trip('emergency_stop','Operator emergency stop')
+        else R.displayTerminal=false; dirty=true end
+        e={}
+      elseif e[1]=='mouse_click' and output~='terminal' and e[4]==4 and e[3]<=14 then
+        R.displayTerminal=true; dirty=true; e={}
+      end
       if e[1]=='monitor_touch' and e[2]==output then e={'mouse_click',1,e[3],e[4]}
       elseif e[1]=='mouse_click' and output~='terminal' then e={} end
       if screen then
@@ -148,6 +159,8 @@ function M.run(R)
         dirty=false
         local ok,why=pcall(function()
           selectOutput()
+          cache.workerPassive=R.role~='master' and R.fresh('master')~=nil
+          cache.canSwitchDisplay=R.role=='master' and R.node.monitor~=nil; cache.onTerminal=output=='terminal'
           cache.message=R.state.message or R.state.updateMessage or ''; cache.events=R.events
           cache.fault,cache.tripPending=faultStatus()
           cache.maintenanceCanRun=R.role=='master' and cache.maintenance.active and cache.maintenance.verified and cache.maintenance.drivesIdle
@@ -166,8 +179,19 @@ function M.run(R)
           screen.draw(cache)
           if output~='terminal' then
             local edit=screen.editing()
-            local text=edit and (edit.key..': '..edit.text..'\nUse the monitor keyboard and Save/Cancel.') or 'Transformer UI on '..output..'\nAll controls and text entry are on the monitor. E: emergency stop.'
-            if text~=lastEdit then term.clear(); term.setCursorPos(1,1); print(text); lastEdit=text end
+            local text=edit and (edit.key..': '..edit.text..(edit.mode=='terminal' and '\nType here; Enter saves, Escape cancels.' or '\nUse the monitor input selector.')) or 'Transformer UI on '..output..'\nAll controls and text entry are on the monitor. E: emergency stop.'
+            if text~=lastEdit then term.clear(); term.setCursorPos(1,1); print(text); term.setCursorPos(1,4); print('[Show UI here]'); lastEdit=text end
+          elseif R.role=='master' and R.node.monitor then
+            local marker='terminal:'..tostring(R.node.monitor)
+            if lastEdit~=marker then
+              pcall(function()
+                local monitor=U.device(R.node.monitor)
+                monitor.setBackgroundColor(colors.black); monitor.clear(); monitor.setTextColor(colors.red)
+                monitor.setCursorPos(1,2); monitor.write(' E-STOP ')
+                monitor.setTextColor(colors.white); monitor.setCursorPos(1,4); monitor.write('Touch to return UI')
+              end)
+              lastEdit=marker
+            end
           end
         end)
         if not ok then R.state.message='Display: '..tostring(why); dirty=true; output=nil end
@@ -177,7 +201,8 @@ function M.run(R)
   end
   local function sample()
     while true do
-      local ok,v=pcall(snapshot); if ok then cache=v else R.state.message=tostring(v) end
+      if R.role~='master' and R.fresh('master') then cache.phase=R.role..' / '..tostring(R.state.phase)
+      else local ok,v=pcall(snapshot); if ok then cache=v else R.state.message=tostring(v) end end
       os.queueEvent('distributed_ui'); sleep(1)
     end
   end
