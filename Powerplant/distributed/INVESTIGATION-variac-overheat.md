@@ -149,37 +149,47 @@ solver state. It is a baseline for deciding whether an isolated mechanical test
 is appropriate, not a request to repeat the destructive energized test.
 
 
-## Isolated movement test
+## Isolated movement test (isolated-bank-4)
 
-Replace a missing bank member and update its configured peripheral name before testing.
-Enter maintenance, quit the master UI, leave workers stopped/in maintenance, and run:
+Replace missing members and update their configured names first. Enter maintenance,
+quit the master UI, and leave workers stopped/in maintenance. Run the standalone
+`tools/test-isolated-bank.lua ALL` to exercise all three banks together; A, B or C
+selects just one bank. The script never closes contacts. It verifies all configured
+breakers are open throughout, checks measured temperatures, and verifies any
+unselected banks remain still. Selected banks may start misaligned while isolated;
+independent direction probes and a full minimum homing command establish an
+aligned baseline. It aborts if any selected bank does not home and align.
 
-```
-wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powerplant/distributed/tools/test-isolated-bank.lua test-isolated-bank.lua
-test-isolated-bank C
-```
+For the configured 315-degree range, each bank receives the same **91 test moves**
+after direction probing and homing:
 
-This test uses only the existing peripheral API. It verifies every configured
-breaker is open, verifies the other banks stay still, records the initial
-positions (which may be misaligned), discovers the selected gearbox direction
-with isolated probes, and homes that bank to minimum. Exact alignment is required
-at the homed endpoint. It then runs 1, 2, 8 and 16 degree forward/back pairs,
-twice per size: 16 test movements after the probes/homing. Each endpoint must be
-stationary across two snapshots, exactly aligned within the bank, and must have
-moved in the commanded direction within configured movement tolerance. The final
-bank position is minimum; the original positions are intentionally not restored.
+- Short reversals of 1, 2 and 4 degrees around 10%, 50% and 90% travel.
+- Medium reversals of 8, 16, 32 and 64 degrees around mid travel.
+- Long moves including both full-range directions and intermediate destinations.
+- Two repetitions of a mixed sequence with short/medium moves and reversals.
+- A final return to minimum; original operating positions are not restored.
 
-The test requires available measured temperatures <=125 C before beginning and
-aborts on a reading >=140 C. During movement it records sequential member position,
-shaft-speed and temperature samples, retaining the first and most recent samples
-up to a 128-sample limit plus every completed movement endpoint. Moving spreads
-are evidence only: separate reads are not an atomic alignment measurement.
+Commands to selected gearboxes are dispatched consecutively, then their movements
+are monitored together. This is overlapping motion, not guaranteed same-tick starts.
+Every bank's command timestamp and direction is logged. No next movement starts
+until every selected bank stops, passes two unchanged snapshots, is exactly aligned
+within its own parallel members, and passes direction/distance/endpoint checks.
+One bank's failure aborts the entire run. All input openings are attempted before
+outputs on completion or abort, including Ctrl+T. An already-issued native sequence
+may finish after abort; no further movement is issued.
 
-Missing peripherals, lost isolation, unexpected motion in another bank, a timeout,
-wrong movement or stopped mismatch abort the test. It never closes a breaker.
-On success, failure or Ctrl+T it attempts every input opening first, then outputs,
-and verifies isolation before saving `/config/isolated-bank-test.json`. A native
-sequence already issued may finish after an abort; no further move is issued.
-Partial logs are saved after completed moves as well as at the final exit.
-The next run replaces this bounded report. Keep the installation in maintenance
-and examine the report; passing does not establish safety under energized load.
+Selected-member position reads are prioritized immediately after commands and run
+back-to-back before temperature/other-bank checks. Read order alternates to help
+identify sampling skew. Per-bank summaries record observed shaft-motion sample
+counts and maximum apparent spread. Absence of moving samples is reported explicitly;
+sequential peripheral reads cannot establish exact same-tick alignment. This test
+does not reproduce the energized electrical solver or its heating behavior.
+
+`/config/isolated-bank-test.json` is replaced after each completed move and on exit.
+It contains all planned destinations and compact movement endpoints, initial/home/final
+snapshots, per-bank sampling coverage and a bounded history retaining the first plus
+most recent samples (32 total) to limit disk usage. Full-report serialization is
+preflighted before movement. Temperatures must be <=125 C initially and remain below
+140 C during the test. Missing peripherals, lost isolation, movement timeout, incorrect
+travel or settled mismatch abort and save a partial report. Keep the transformer in
+maintenance for report review after the test.
