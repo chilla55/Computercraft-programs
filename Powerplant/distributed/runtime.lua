@@ -9,9 +9,10 @@ function M.new(config,node,modules,root)
   local counter=0
   R.token=function() counter=counter+1; return R.session..':'..counter end
   R.state={latched=true,phase='stopped',generation=0,target=config.settings.target,events=R.events,runRequested=false}
-  local saved=U.read('distributed-state.json')
+  local saved=U.readState(config.settings)
   if saved then
     assert(type(saved)=='table' and type(saved.events)=='table','Invalid saved state')
+    R.state.message=saved.recovery
     R.state.target=saved.target or R.state.target
     R.state.runRequested=saved.runRequested==true or (saved.runRequested==nil and saved.latched==false)
     R.state.realignRequested=saved.realignRequested==true

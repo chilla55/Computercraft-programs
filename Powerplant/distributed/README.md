@@ -25,7 +25,7 @@ wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powe
 install-transformer.lua
 ```
 
-To select an exact release, use `install-transformer.lua transformer distributed-1.1.24` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
+To select an exact release, use `install-transformer.lua transformer distributed-1.1.25` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
 
 The default installation folder is `transformer/`, which holds the original fallback and stable launcher and verifies every file against the GitHub release manifest. It does not replace an existing installation or alter startup scripts. HTTP must be enabled and GitHub accessible. Alternatively, copy all top-level `.lua` files from this directory into `transformer/` using a disk.
 
@@ -170,3 +170,8 @@ Monitor footers omit terminal keyboard/mouse hints. Display switching sits besid
 A trip that interrupts breaker closure retains its original incident reason. Protection reopens and verifies contacts after the cancelled native close returns; failure to isolate generates a separate fault. Invalid regulator-input incidents include the measured voltage, gauge, permitted range and phase. Live local-search failures report input/output/target, predicted nearest local output and bank angles; they do not claim the target is globally unreachable.
 
 Trip opening attempts every configured input breaker before the output breakers, then verifies all contacts. A failed input opening does not skip other contacts. Thermal sampling faults include the previous valid reading/time, interval and last known regulation phase when available. This shortens source-isolation command latency and improves evidence; it does not guarantee protection against heating faster than peripheral sampling and breaker response.
+
+
+Operating-state writes keep one `/config/distributed-state.json.bak`. A blank or whitespace-only state file creates a fresh stopped log automatically, ignoring older history. Nonempty malformed JSON or invalid state fields require operator confirmation before replacement: Reset creates a new log, Restore uses a valid saved copy if available, and Cancel preserves the file. The prompt uses the configured monitor when attached, otherwise the terminal. Damaged files are retained with a `.corrupt` suffix after approval. Recovered/reset state is latched and never automatically resumes. Valid saved state retains the normal startup-intent behavior. This recovery applies only to the operating log; wiring/configuration and thermal history are not reset.
+
+For isolated mechanical testing using existing peripherals, see [the investigation's isolated movement procedure](INVESTIGATION-variac-overheat.md#isolated-movement-test). Standalone diagnostic tools are downloaded separately and do not require a runtime release update.

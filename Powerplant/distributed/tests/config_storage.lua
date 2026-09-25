@@ -27,4 +27,36 @@ files['/config/distributed-node.json']='broken json'
 check(not pcall(U.read,'distributed-node.json'),'corrupt new config silently fell back to stale root file')
 U.write('install/active-release.json',{version='test'})
 check(files['install/active-release.json'] and not files['/config/install/active-release.json'],'release pointer incorrectly relocated')
+local settings={target=2640,stepUp=2.5,maxInputVolts=2800}
+local path='/config/distributed-state.json'
+local running={events={{id='old',reason='prior incident'}},target=2600,runRequested=true,latched=false}
+files={}
+check(U.readState(settings)==nil,'absent state invented recovery')
+U.write('distributed-state.json',running)
+check(U.readState(settings).runRequested,'valid saved running intent lost')
+U.write('distributed-state.json',{events={},target=2640,runRequested=false,latched=true})
+check(files[path..'.bak']~=nil,'last valid state not backed up')
+files[path]='broken'
+local before=files[path]
+check(not pcall(U.readState,settings) and files[path]==before,'corrupt state reset without consent')
+local called=false
+local recovered=U.readState(settings,function(file,backup) called=file==path and backup==path..'.bak'; return 'restore' end)
+check(called and recovered.target==2600 and #recovered.events==1,'confirmed backup not restored')
+check(recovered.latched and not recovered.runRequested and not recovered.realignRequested,'backup restarted transformer automatically')
+check(files[path..'.corrupt']=='broken','damaged file not preserved')
+files={}; files[path]='  \n  '; files[path..'.bak']=serialize(running)
+recovered=U.readState(settings,function() error('empty file must not prompt') end)
+check(recovered.target==2640 and recovered.latched and #recovered.events==0,'empty file did not create fresh log')
+files={}; files[path]=serialize(running); files[path..'.tmp']='broken'
+check(not pcall(U.readState,settings,function() return false end) and files[path..'.tmp']=='broken','cancel changed corrupt temporary file')
+recovered=U.readState(settings,function() return 'restore' end)
+check(recovered.target==2600 and not recovered.runRequested,'confirmed base recovery failed')
+files={}; files[path]=serialize(running); files[path..'.tmp']=serialize({events={},target=2500,runRequested=true,latched=false})
+check(U.readState(settings).target==2500 and U.readState(settings).runRequested,'valid newest checkpoint not used')
+for _,bad in ipairs({{events='bad'}, {events={{reason='missing id'}}}, {events={},target=999999}, {events={},runRequested='true'}, false}) do
+ files={}; files[path]=serialize(bad)
+ check(not pcall(U.readState,settings),'invalid nonempty state silently reset')
+ recovered=U.readState(settings,function() return 'reset' end)
+ check(recovered.target==2640 and not recovered.runRequested,'confirmed reset did not create stopped defaults')
+end
 print(('PASS: %d config storage checks'):format(n))

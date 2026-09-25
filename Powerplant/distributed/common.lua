@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.24',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.25',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 M.fields={
   inputGauge={label="Voltage entering variacs",help="Required. Voltage gauge AFTER the entry transformer, BEFORE stage A."},
@@ -61,11 +61,91 @@ function M.read(path)
   local f=assert(fs.open(recovery,'r')); local text=f.readAll(); f.close()
   return assert(textutils.unserializeJSON(text),'Invalid JSON: '..path)
 end
+local function validState(v,s)
+  if type(v)~='table' or type(v.events)~='table' then return false end
+  for _,event in pairs(v.events) do
+    if type(event)~='table' or type(event.id)~='string' or type(event.reason)~='string' then return false end
+  end
+  for _,key in ipairs({'runRequested','realignRequested','latched'}) do
+    if v[key]~=nil and type(v[key])~='boolean' then return false end
+  end
+  if v.target~=nil and (not M.finite(v.target) or v.target<=0 or s and v.target/(s.stepUp*.99999^3)>=s.maxInputVolts) then return false end
+  return (v.phase==nil or type(v.phase)=='string') and (v.fault==nil or type(v.fault)=='string')
+end
+local function decodeFile(path)
+  local f=assert(fs.open(path,'r')); local raw=f.readAll(); f.close()
+  return textutils.unserializeJSON(raw)
+end
+local function replaceMove(source,destination)
+  if fs.exists(destination) then fs.delete(destination) end
+  fs.move(source,destination)
+end
+-- Only operating state is recoverable this way. Wiring/configuration and
+-- thermal protection history retain their stricter failure behavior.
+function M.readState(s,confirm)
+  local path=M.configPath('distributed-state.json')
+  local function fresh()
+    return {target=s.target,events={},latched=true,runRequested=false,realignRequested=false,phase='stopped',
+      recovery='Created a fresh operating log; manual Resume/reset required'}
+  end
+  local empty={}
+  local function candidate(file)
+    if not fs.exists(file) then return 'missing' end
+    local ok,value=pcall(function()
+      local f=assert(fs.open(file,'r')); local raw=f.readAll(); f.close()
+      if raw:match('^%s*$') then return empty end
+      return textutils.unserializeJSON(raw)
+    end)
+    if ok and value==empty then return 'empty' end
+    if ok and validState(value,s) then return 'valid',value end
+    return 'corrupt'
+  end
+  for _,file in ipairs({path..'.tmp',path}) do
+    local status,value=candidate(file)
+    if status=='valid' then return value end
+    if status=='empty' and file==path then
+      local value=fresh(); M.write(path,value); return value
+    end
+    if status=='corrupt' then
+      local backup,backupPath
+      for _,other in ipairs({path,path..'.bak'}) do
+        if other~=file then
+          local valid,v=candidate(other)
+          if valid=='valid' then backup=v; backupPath=other; break end
+        end
+      end
+      local action=confirm and confirm(file,backupPath)
+      assert(action=='reset' or action=='restore' and backup,'Corrupt operating state preserved: '..file..'; operator confirmation required to reset or restore')
+      -- No state-file mutation occurs before the operator's decision.
+      replaceMove(file,file..'.corrupt')
+      value=action=='restore' and backup or fresh()
+      value.latched=true; value.runRequested=false; value.realignRequested=false; value.phase='stopped'; value.fault=nil
+      value.recovery=action=='restore' and ('Restored '..backupPath..'; manual Resume/reset required') or value.recovery
+      M.write(path,value); return value
+    end
+  end
+  -- Preserve legacy migration only when no new-path state exists.
+  if not fs.exists(path) and not fs.exists(path..'.tmp') then
+    local legacy=fs.exists('distributed-state.json.tmp') and 'distributed-state.json.tmp' or 'distributed-state.json'
+    local status,value=candidate(legacy)
+    if status=='valid' then M.write(path,value); return value end
+    if status=='corrupt' then
+      assert(confirm and confirm(legacy,nil)=='reset','Corrupt legacy operating state preserved; operator confirmation required')
+      replaceMove(legacy,legacy..'.corrupt')
+    elseif status=='missing' then return nil end
+  end
+  local value=fresh(); M.write(path,value); return value
+end
 function M.write(path,value)
   path=M.configPath(path)
   local parent=fs.getDir(path); if parent~='' and not fs.exists(parent) then fs.makeDir(parent) end
   local f=assert(fs.open(path..'.tmp','w')); f.write(textutils.serializeJSON(value)); f.close()
-  if fs.exists(path) then fs.delete(path) end
+  if fs.exists(path) then
+    if path==M.configPath('distributed-state.json') then
+      local ok,old=pcall(decodeFile,path)
+      replaceMove(path,path..(ok and validState(old) and '.bak' or '.corrupt'))
+    else fs.delete(path) end
+  end
   fs.move(path..'.tmp',path)
 end
 function M.validate(c)

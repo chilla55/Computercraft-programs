@@ -147,3 +147,39 @@ Missing members are recorded without skipping healthy members. Report:
 This does not establish alignment during energized motion or expose internal
 solver state. It is a baseline for deciding whether an isolated mechanical test
 is appropriate, not a request to repeat the destructive energized test.
+
+
+## Isolated movement test
+
+Replace a missing bank member and update its configured peripheral name before testing.
+Enter maintenance, quit the master UI, leave workers stopped/in maintenance, and run:
+
+```
+wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powerplant/distributed/tools/test-isolated-bank.lua test-isolated-bank.lua
+test-isolated-bank C
+```
+
+This test uses only the existing peripheral API. It verifies every configured
+breaker is open, verifies the other banks stay still, records the initial
+positions (which may be misaligned), discovers the selected gearbox direction
+with isolated probes, and homes that bank to minimum. Exact alignment is required
+at the homed endpoint. It then runs 1, 2, 8 and 16 degree forward/back pairs,
+twice per size: 16 test movements after the probes/homing. Each endpoint must be
+stationary across two snapshots, exactly aligned within the bank, and must have
+moved in the commanded direction within configured movement tolerance. The final
+bank position is minimum; the original positions are intentionally not restored.
+
+The test requires available measured temperatures <=125 C before beginning and
+aborts on a reading >=140 C. During movement it records sequential member position,
+shaft-speed and temperature samples, retaining the first and most recent samples
+up to a 128-sample limit plus every completed movement endpoint. Moving spreads
+are evidence only: separate reads are not an atomic alignment measurement.
+
+Missing peripherals, lost isolation, unexpected motion in another bank, a timeout,
+wrong movement or stopped mismatch abort the test. It never closes a breaker.
+On success, failure or Ctrl+T it attempts every input opening first, then outputs,
+and verifies isolation before saving `/config/isolated-bank-test.json`. A native
+sequence already issued may finish after an abort; no further move is issued.
+Partial logs are saved after completed moves as well as at the final exit.
+The next run replaces this bounded report. Keep the installation in maintenance
+and examine the report; passing does not establish safety under energized load.

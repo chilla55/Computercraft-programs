@@ -162,8 +162,37 @@ if command=='startup' then installStartup(); return end
 if node.role~='master' or command=='trip' then
   local isolated,reason=U.openAll(node.config.settings); assert(isolated,reason)
 end
+local function confirmStateRepair(path,backup)
+  local monitor=node.monitor and peripheral.wrap(node.monitor)
+  local screen=monitor or term
+  local w,h=screen.getSize()
+  screen.clear(); screen.setCursorPos(1,1); screen.write('Operating log is corrupted')
+  screen.setCursorPos(1,2); screen.write('Reset log? Config is retained.')
+  screen.setCursorPos(1,3); screen.write('Cancel keeps the file unchanged.')
+  local row=math.min(h,5)
+  screen.setCursorPos(1,row); screen.write('[Reset] [Cancel]')
+  if backup then screen.setCursorPos(1,math.min(h,row+1)); screen.write('[Restore saved copy]') end
+  if not monitor then print('Type reset, restore (if available), or cancel, then Enter.') end
+  while true do
+    if not monitor then
+      local answer=read():lower()
+      if answer=='reset' or answer=='restore' and backup then return answer end
+      if answer=='cancel' or answer=='' then return false end
+    else
+      local event,name,x,y=os.pullEvent()
+      if event=='monitor_touch' and name==node.monitor then
+        if y==row and x>=1 and x<=7 then return 'reset' end
+        if y==row and x>=9 and x<=16 then return false end
+        if backup and y==row+1 and x<=math.min(w,20) then return 'restore' end
+      elseif event=='peripheral_detach' and name==node.monitor then return false end
+    end
+  end
+end
+-- Prompt before loading runtime, so damaged state cannot crash the normal UI
+-- repeatedly or be silently discarded. A blank file needs no confirmation.
+U.readState(node.config.settings,confirmStateRepair)
 if command=='trip' then
-  local saved=U.read('distributed-state.json')
+  local saved=U.readState(node.config.settings)
   if saved then saved.runRequested=false; saved.realignRequested=false; saved.latched=true; U.write('distributed-state.json',saved) end
   print('All configured breakers verified open; automatic restart disabled.'); return
 end
