@@ -134,8 +134,20 @@ d.workerPassive=true; keypad.draw(d)
 check(keypad.event('mouse_click',1,1,2).kind=='emergency','passive worker lacks emergency stop')
 check(keypad.event('mouse_click',1,1,h-2)==nil,'passive worker exposed full controls')
 d.workerPassive=false; d.canSwitchDisplay=true; d.onTerminal=true; keypad.draw(d)
-check(keypad.event('mouse_click',1,1,h).kind=='display_switch','display switch button absent')
+check(keypad.event('mouse_click',1,38,h-2).kind=='display_switch','display switch button absent')
 d.canSwitchDisplay=nil
+for _,width in ipairs({45,51,57,78}) do
+ w=width; h=29; d.canSwitchDisplay=true; d.onTerminal=false
+ local footer=UI.new(screen,c); footer.draw(d)
+ check(lines[1]:sub(-15)==' EMERGENCY STOP','emergency label clipped')
+ check(footer.event('mouse_click',1,w,1).kind=='emergency','last emergency letter not clickable')
+ check(not lines[h-1]:find('Scroll:',1,true),'terminal hints shown on monitor')
+ check(footer.event('mouse_click',1,38,h-2).kind=='display_switch','display switch not next to Quit')
+ check(footer.event('mouse_click',1,w-1,h-2)==nil,'monitor scroll leaked an external action')
+ d.onTerminal=true; footer.draw(d)
+ check(lines[h-1]:find('Scroll:',1,true),'terminal hints missing on terminal')
+end
+d.canSwitchDisplay=nil; d.onTerminal=nil
 w=15; h=29
 -- The renderer may yield in a monitor write without blocking touch input.
 local tasks,actions={},{}

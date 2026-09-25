@@ -25,7 +25,7 @@ wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powe
 install-transformer.lua
 ```
 
-To select an exact release, use `install-transformer.lua transformer distributed-1.1.19` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
+To select an exact release, use `install-transformer.lua transformer distributed-1.1.20` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
 
 The default installation folder is `transformer/`, which holds the original fallback and stable launcher and verifies every file against the GitHub release manifest. It does not replace an existing installation or alter startup scripts. HTTP must be enabled and GitHub accessible. Alternatively, copy all top-level `.lua` files from this directory into `transformer/` using a disk.
 
@@ -164,3 +164,5 @@ Selecting a setting opens an input-method selector: Terminal or Touch keys. Nume
 
 
 The master has a Use terminal / Use monitor button. When the UI is on the monitor, the computer also offers Show UI here; when it is on the computer, touching the monitor restores the UI, except the marked E-STOP row which remains an emergency control. Display switches preserve the open page and draft edit. Worker screens suppress the full interface and peripheral UI sampling while a fresh master heartbeat is present, showing master-connected status, faults and emergency stop instead. The full worker UI returns automatically when the master is unavailable. Worker protection and regulation are unaffected by this display mode.
+
+Monitor footers omit terminal keyboard/mouse hints. Display switching sits beside Quit; wide monitor layouts also provide touch scroll arrows on that control row. The full emergency-stop label and its last character remain inside the screen.

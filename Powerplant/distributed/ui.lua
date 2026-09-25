@@ -39,7 +39,8 @@ function M.new(screen,c,clock)
   end
   local function button(x,y,label,action,bg)
     put(x,y,label,c.white,bg or c.gray,nil,true)
-    hits[#hits+1]={x=x,y=y,width=#label,action=action}
+    local w=screen.getSize()
+    hits[#hits+1]={x=x,y=y,width=math.max(0,math.min(#label,w-x+1)),action=action}
   end
   local api={}
   function api.draw(data)
@@ -66,8 +67,8 @@ function M.new(screen,c,clock)
       put(3,3,tab,c.cyan,nil,w-4)
       button(w,3,'>',{kind='page',delta=1})
     else
-      put(1,1,'TRANSFORMER '..string.upper(data.phase or '?'),c.cyan,nil,w-14)
-      button(math.max(1,w-13),1,' EMERGENCY STOP',{kind='emergency'},c.red)
+      put(1,1,'TRANSFORMER '..string.upper(data.phase or '?'),c.cyan,nil,w-15)
+      button(math.max(1,w-14),1,' EMERGENCY STOP',{kind='emergency'},c.red)
       if w<78 then
         button(1,2,'<',{kind='page',delta=-1}); put(3,2,tab,c.cyan,nil,w-4)
         button(w,2,'>',{kind='page',delta=1})
@@ -206,6 +207,7 @@ function M.new(screen,c,clock)
       else
         put(1,h-2,'Tgt '..fmt(data.nominalTarget,'V'),c.cyan)
         button(1,h-1,' Quit ',{kind='stop'})
+        if data.canSwitchDisplay then button(8,h-1,w>=20 and (data.onTerminal and 'Use monitor' or 'Use terminal') or (data.onTerminal and 'Monitor' or 'PC'),{kind='display_switch'}) end
       end
       put(1,h,editing and editing.text:sub(-w) or (data.updateDeferred and 'Update postponed' or 'Tap to control'),c.lightGray)
     else
@@ -214,7 +216,12 @@ function M.new(screen,c,clock)
     button(1,h-2,' Maintenance ',{kind='maintenance'})
     button(15,h-2,' Resume/reset ',{kind='resume'})
     button(31,h-2,' Quit ',{kind='stop'})
-    put(1,h-1,'Scroll: wheel/up/down | E: emergency | Q: quit',c.lightGray)
+    if data.canSwitchDisplay then button(38,h-2,w>=55 and (data.onTerminal and 'Use monitor' or 'Use terminal') or (data.onTerminal and 'Mon' or 'PC'),{kind='display_switch'}) end
+    if data.onTerminal then put(1,h-1,'Scroll: wheel/up/down | E: emergency | Q: quit',c.lightGray)
+    else
+      button(w-4,h-2,'^',{kind='scroll',delta=-1})
+      button(w-1,h-2,'v',{kind='scroll',delta=1})
+    end
     if editing then put(1,h,editing.key..': '..editing.text,c.yellow)
     else put(1,h,tab=='Settings' and 'Click setting. Wiring changes require maintenance.' or 'Contacts open does not prove absence of voltage.',c.lightGray) end
     if data.updateReady then
@@ -231,7 +238,6 @@ function M.new(screen,c,clock)
       end
     end
     end
-    if not editing and data.canSwitchDisplay then button(1,h,data.onTerminal and 'Use monitor' or 'Use terminal',{kind='display_switch'}) end
     if editing then
       -- Monitor-only editing: replace the page with a touch keyboard, keeping
       -- emergency stop reachable and never requiring the computer keyboard.
