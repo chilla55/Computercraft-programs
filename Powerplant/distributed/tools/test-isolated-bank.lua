@@ -16,9 +16,15 @@ assert(finite(s.travelDegrees) and s.travelDegrees>=16,'Invalid travel range')
 local report={schema=1,kind='isolated_bank_motion',stage=stage,members=members,startedAt=now(),
  atomic=false,moves={},samples={},droppedSamples=0,completed=false,
  limitation='Sequential position samples; cannot prove equal positions within a game tick or reproduce energized circuit behavior.'}
+-- CC:Tweaked JSON rejects repeated table identities, even without cycles.
+local function copy(value)
+ if type(value)~='table' then return value end
+ local result={}; for k,v in pairs(value) do result[k]=copy(v) end; return result
+end
 local destination='/config/isolated-bank-test.json'
 local function save()
- local out=assert(fs.open(destination..'.tmp','w')); out.write(textutils.serializeJSON(report)); out.close()
+ local encoded=textutils.serializeJSON(report)
+ local out=assert(fs.open(destination..'.tmp','w')); out.write(encoded); out.close()
  if fs.exists(destination) then fs.delete(destination) end
  fs.move(destination..'.tmp',destination)
 end
@@ -90,13 +96,13 @@ local function move(label,degrees,direction,aligned)
  report.moves[#report.moves+1]=record
  device(gearName).rotate(degrees,direction)
  sleep(.05)
- local after=settled(label,aligned); record.after=after; record.finishedAt=now()
+ local after=settled(label,aligned); record.after=copy(after); record.finishedAt=now()
  save(); return after
 end
 print('ISOLATED bank '..stage..' movement test. All breakers must stay OPEN.')
 print('Both members will be homed to minimum and left there. Ctrl+T aborts.')
 local ok,why=pcall(function()
- local initial=settled('initial',false); report.initial=initial
+ local initial=settled('initial',false); report.initial=copy(initial)
  for _,entry in ipairs(initial.members) do assert(entry.thermal.temperature<=125,'Cool below 125 C before test') end
  -- Direction probe is allowed to start misaligned, but only in isolation.
  local probe=move('direction probe',3,1,false)
@@ -122,7 +128,7 @@ local ok,why=pcall(function()
  report.increasingDirection=sign
  local home=move('home minimum',math.ceil(s.travelDegrees)+3,-sign,true)
  for _,entry in ipairs(home.members) do assert(entry.status.position*s.travelDegrees<=.1,'Member did not home: '..entry.name) end
- report.homed=home
+ report.homed=copy(home)
  for _,degrees in ipairs({1,2,8,16}) do
   for repetition=1,2 do
    for _,delta in ipairs({degrees,-degrees}) do
@@ -137,7 +143,7 @@ local ok,why=pcall(function()
    end
   end
  end
- report.final=settled('final minimum',true)
+ report.final=copy(settled('final minimum',true))
  for _,entry in ipairs(report.final.members) do assert(entry.status.position*s.travelDegrees<=.1,'Final position not minimum') end
  report.completed=true
 end)

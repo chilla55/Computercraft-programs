@@ -9,7 +9,15 @@ local function run(options)
  local env=setmetatable({},{__index=_G})
  env.os={epoch=function() time=time+1; return time end}; env.print=function() end
  env.sleep=function(dt) time=time+dt*1000; if options.terminate and #moves>0 then options.terminate=false; error('Terminated') end end
- env.textutils={unserializeJSON=function() return {role='master',config={settings=settings}} end,serializeJSON=function(v) report=v; return 'report' end}
+ env.textutils={unserializeJSON=function() return {role='master',config={settings=settings}} end,serializeJSON=function(v)
+  local seen={}
+  local function visit(item)
+   if type(item)~='table' then return end
+   assert(not seen[item],'Cannot serialize table with repeated entries')
+   seen[item]=true; for _,child in pairs(item) do visit(child) end
+  end
+  visit(v); report=v; return 'report'
+ end}
  env.fs={exists=function(p) return files[p]~=nil end,delete=function(p) files[p]=nil end,move=function(a,b) files[b]=files[a];files[a]=nil end,
  open=function(p,mode) return {readAll=function() return 'config' end,write=function(v) files[p]=v end,close=function() end} end}
  env.peripheral={wrap=function(name)
