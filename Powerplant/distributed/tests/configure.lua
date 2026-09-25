@@ -4,7 +4,7 @@ local common=dofile(base..'common.lua')
 local count=0; local function check(v,m) assert(v,m); count=count+1 end
 local mapping={inputGauge='in',outputGauge='out',inputBreakers='input-breaker',plusBreaker='plus',minusBreaker='minus',
  gearA='drive-a',gearB='drive-b',gearC='drive-c',variacsA='a1,a2',variacsB='b',variacsC='c'}
-local function run(saved,legacy,answers,startup,role)
+local function run(saved,legacy,answers,startup,role,noShell,command)
  local files=startup or {}
  local U=common.copy(common); local written,label,observed
  observed={}
@@ -13,7 +13,7 @@ local function run(saved,legacy,answers,startup,role)
  U.isolated=function() return true end; U.idle=function() return true end
  local D={modems=function() return {'wired'},{} end,open=function() end,host=function() end,
  find=function(_,role) return role=='master' and 1 or role=='regulation' and 2 or 3 end}
- local env=setmetatable({fs={combine=function(a,b) return a..'/'..b end,
+ local env=setmetatable({fs={combine=function(a,b) return a:gsub('/$','')..'/'..b end,
  exists=function(path) return files[path]~=nil end,
  open=function(path) return {write=function(bytes) files[path]=bytes end,close=function() end} end,
  makeDir=function(path) files[path]={} end,getName=function(path) return path:match('[^/]+$') end,
@@ -30,7 +30,8 @@ local function run(saved,legacy,answers,startup,role)
    observed[label]=text
  end,
  read=function() local answer=(answers or {})[label]; if type(answer)=='table' then return table.remove(answer,1) or '' end; return answer or '' end},{__index=_G})
- local ok,why=pcall(assert(loadfile(base..'app.lua','t',env)),base,'configure',role or 'master')
+ if noShell then env.shell=nil end
+ local ok,why=pcall(assert(loadfile(base..'app.lua','t',env)),type(noShell)=='string' and noShell or base,command or 'configure',role or 'master')
  return ok,written,observed,why,files
 end
 local ok,node,shown,why,files=run(nil,nil,mapping)
@@ -78,4 +79,11 @@ local retried,retryNode=run(custom,nil,{outputTripPercent={'oops','1e999',''}})
 check(retried and retryNode.config.settings.outputTripPercent==10,'invalid numeric input aborted setup instead of retrying')
 local typed,typedNode=run(custom,nil,{outputTripPercent=' 12.5 '})
 check(typed and typedNode.config.settings.outputTripPercent==12.5,'valid numeric input changed')
+local globalOnly,globalNode,_,failure,globalFiles=run(nil,nil,mapping,nil,'master',true)
+check(globalOnly and globalNode and globalFiles['/startup.lua'],'shell-less app failed: '..tostring(failure))
+check(globalFiles['/startup.lua']:find('/Powerplant/distributed/transformer.lua',1,true),'shell-less startup path wrong')
+local startupOnly,_,_,startupError,startupFiles=run(node,nil,{},nil,'master',true,'startup')
+check(startupOnly and startupFiles['/startup.lua'],'startup-only recovery failed: '..tostring(startupError))
+local activeLegacy,_,_,activeError,activeFiles=run(nil,nil,mapping,nil,'master','transformer/releases/distributed-1.1.7')
+check(activeLegacy and activeFiles['/startup.lua']:find('/transformer/transformer.lua',1,true),'legacy launcher selected release-local startup: '..tostring(activeError))
 print(('PASS: %d commissioning checks'):format(count))

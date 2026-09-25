@@ -1,5 +1,12 @@
-local root,command,requestedRole=...
-local function module(name) return assert(loadfile(fs.combine(root,name..'.lua')))() end
+local root,command,requestedRole,launchContext=...
+-- Older stable launchers may load this chunk into the global environment,
+-- where CraftOS does not provide the per-program shell API.
+local installRoot=root:match('^(.*)/releases/distributed%-%d+%.%d+%.%d+$') or
+  (root:match('^releases/distributed%-%d+%.%d+%.%d+$') and '') or root
+local launcher=launchContext and launchContext.launcher or
+  (shell and shell.getRunningProgram()) or fs.combine(installRoot,'transformer.lua')
+local workingDirectory=launchContext and launchContext.working or (shell and shell.dir()) or ''
+local function module(name) return assert(loadfile(fs.combine(root,name..'.lua'),'t',_ENV))() end
 local U=module('common')
 local D=module('discovery')
 local node=U.read('distributed-node.json')
@@ -26,8 +33,8 @@ local function installStartup()
     local answer=prompt('Back up existing startup and enable transformer autostart? yes/no','yes')
     if answer:lower()~='yes' then print('Startup left unchanged. Start this role manually.'); return end
   end
-  local program=shell.getRunningProgram()
-  local working=shell.dir()
+  local program=launcher
+  local working=workingDirectory
   -- Use the stable launcher, so approved updates still take effect after boot.
   local body='-- Distributed transformer autostart\n'..
     'shell.setDir('..string.format('%q',working)..')\n'..
@@ -76,6 +83,16 @@ local function configure()
     end
   end
   if role=='master' then
+    print('This transformer needs two worker computers:')
+    print('REGULATION: moves the variacs; can open breakers.')
+    print('PROTECTION: reads temperatures and is the only role allowed to close breakers.')
+    print('Connect both to the same wired modem network.')
+    print('On the regulation computer run:')
+    print(launcher..' configure regulation')
+    print('On the protection computer run:')
+    print(launcher..' configure protection')
+    print('Select cluster '..cluster..' on both. Computer IDs are discovered automatically.')
+    print('Workers wait for configuration until this master finishes setup and starts running.')
     local legacy=U.read('dual-variac-config.json')
     local saved=node and node.config and node.config.settings or legacy
     local settings={target=2640,stepUp=2.5,entryRatio=1,
@@ -141,6 +158,7 @@ end
 if command=='configure' then configure(); return end
 assert(node,'Run transformer.lua configure master|regulation|protection first')
 U.validate(node.config); assert(node.config.ids[node.role]==os.getComputerID(),'Configuration belongs to another computer')
+if command=='startup' then installStartup(); return end
 if node.role~='master' or command=='trip' then
   local isolated,reason=U.openAll(node.config.settings); assert(isolated,reason)
 end
@@ -152,7 +170,7 @@ end
 D.open(node.modem); D.host(node.config.cluster or 'transformer',node.role)
 assert(command==nil or command=='run','Use configure, run, trip or rollback')
 local modules={common=U,thermal=module('thermal_protection'),planner=module('planner'),hash=module('sha256'),ui=module('ui'),updater=module('updater')}
-local R=module('runtime').new(node.config,node,modules,fs.getDir(shell.getRunningProgram()))
+local R=module('runtime').new(node.config,node,modules,fs.getDir(launcher))
 local worker
 if node.role~='master' then
   local ready,result=pcall(function() return module(node.role).new(R) end)

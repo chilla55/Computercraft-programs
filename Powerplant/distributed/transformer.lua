@@ -39,9 +39,9 @@ if command=='rollback' then
   print('Selected '..previous..'; automatic updates disabled locally. Run transformer.lua run to start stopped.'); return
 end
 local directory=folder(active and active.version)
-local app,why=loadfile(fs.combine(directory,'app.lua'))
+local app,why=loadfile(fs.combine(directory,'app.lua'),'t',_ENV)
 if not app then
   -- No automatic change to another release without verifying physical isolation.
   error('Release cannot load: '..tostring(why)..'; use transformer.lua rollback after isolation',0)
 end
-return app(directory,command,role)
+return app(directory,command,role,{launcher=shell.getRunningProgram(),working=shell.dir()})

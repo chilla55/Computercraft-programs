@@ -25,7 +25,7 @@ wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powe
 install-transformer.lua
 ```
 
-To select an exact release, use `install-transformer.lua transformer distributed-1.1.6` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
+To select an exact release, use `install-transformer.lua transformer distributed-1.1.7` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
 
 The default installation folder is `transformer/`, which holds the original fallback and stable launcher and verifies every file against the GitHub release manifest. It does not replace an existing installation or alter startup scripts. HTTP must be enabled and GitHub accessible. Alternatively, copy all top-level `.lua` files from this directory into `transformer/` using a disk.
 
@@ -54,7 +54,7 @@ transformer/transformer.lua configure protection
 transformer/transformer.lua run
 ```
 
-Once the master wizard finishes, start its `run` command so the waiting worker wizards can fetch their configuration. The workers discover the master ID and use their selected wired modem. Each validates its assigned ID. Successful configuration creates `/startup.lua` to launch that role automatically at boot, using the stable release launcher. If `/startup` or `/startup.lua` already exists, setup offers to move it to a numbered `/transformer-startup-backup-N/` folder before replacing it. Declining leaves startup unchanged. Autostart restores the saved operating intent through the precheck/startup sequence described above; it never simply closes contacts at boot. New installations remain stopped until the first Resume/reset. Configuration, operating state and thermal checkpoints live in `/config/distributed-node.json`, `/config/distributed-state.json` and `/config/distributed-thermal.json`. Each computer must see the configured peripheral names.
+Once the master wizard finishes, start its `run` command so the waiting worker wizards can fetch their configuration. The workers discover the master ID and use their selected wired modem. Each validates its assigned ID. Successful configuration creates `/startup.lua` to launch that role automatically at boot, using the stable release launcher. If `/startup` or `/startup.lua` already exists, setup offers to move it to a numbered `/transformer-startup-backup-N/` folder before replacing it. Declining leaves startup unchanged. You can create or repair autostart later using `transformer/transformer.lua startup`, without repeating the configuration wizard. Autostart restores the saved operating intent through the precheck/startup sequence described above; it never simply closes contacts at boot. New installations remain stopped until the first Resume/reset. Configuration, operating state and thermal checkpoints live in `/config/distributed-node.json`, `/config/distributed-state.json` and `/config/distributed-thermal.json`. Each computer must see the configured peripheral names.
 
 Use **Resume/reset** on the UI or protection computer once temperatures are fresh and every variac is at or below 125 C. It verifies open contacts and idle drives, clears the thermal latch without replenishing curve credits, and creates a new operating cycle. Regulation then:
 
@@ -127,6 +127,7 @@ lua Powerplant/distributed/tests/configure.lua
 lua Powerplant/distributed/tests/install.lua
 lua Powerplant/distributed/tests/config_storage.lua
 lua Powerplant/distributed/tests/alignment.lua
+lua Powerplant/distributed/tests/launcher.lua
 ```
 
 The integration fixture runs all three roles in separate Lua environments, with shared simulated peripherals, yielding native calls and CC-style event routing. It covers isolated bank homing, protection-only closure, UI loss, a hot follower, reset/restart, unknown contact opening and heartbeat loss even while hello messages still arrive, automatic restart from persisted running state without the UI, refusal to automatically clear stopped or thermal-tripped states, shafts moving despite an idle gearbox, automatic isolated realignment, and jammed recovery without repeated retries. It does not model Minecraft's electrical or thermal physics.
