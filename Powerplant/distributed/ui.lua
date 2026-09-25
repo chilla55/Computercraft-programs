@@ -198,7 +198,7 @@ function M.new(screen,c,clock)
         put(1,h-2,'Tgt '..fmt(data.nominalTarget,'V'),c.cyan)
         button(1,h-1,' Quit ',{kind='stop'})
       end
-      put(1,h,editing and editing.text:sub(-w) or (data.updateDeferred and 'Update postponed' or 'Tap; type on PC'),c.lightGray)
+      put(1,h,editing and editing.text:sub(-w) or (data.updateDeferred and 'Update postponed' or 'Tap to control'),c.lightGray)
     else
     statusLine(h-4)
     put(1,h-3,data.maintenance.reason or data.message or '',c.lightGray)
@@ -221,6 +221,34 @@ function M.new(screen,c,clock)
         else put(1,h,data.updateApplying and 'Applying approved update...' or data.updateChecking and 'Checking and staging update...' or 'Staged only; waiting for UI master approval.',c.lightGray) end
       end
     end
+    end
+    if editing then
+      -- Monitor-only editing: replace the page with a touch keyboard, keeping
+      -- emergency stop reachable and never requiring the computer keyboard.
+      frame={}; hits={}
+      put(1,1,'EDIT SETTING',c.cyan)
+      button(1,2,' E-STOP ',{kind='emergency'},c.red)
+      put(1,3,editing.key,c.cyan)
+      put(1,4,editing.text:sub(-w),c.yellow)
+      put(1,5,editing.replace and 'Typing replaces value' or 'Typing appends',c.lightGray)
+      local stride=h>=25 and 2 or 1
+      local keyWidth=math.max(1,math.floor(w/10))
+      for r,letters in ipairs({'1234567890','qwertyuiop','asdfghjkl','zxcvbnm','_-:.,/+=()'}) do
+        if editing.shift then letters=letters:upper() end
+        for i=1,#letters do
+          local char=letters:sub(i,i)
+          local padding=math.floor((keyWidth-1)/2)
+          button(1+(i-1)*keyWidth,7+(r-1)*stride,string.rep(' ',padding)..char..string.rep(' ',keyWidth-1-padding),{kind='key_text',text=char})
+        end
+      end
+      local controls=7+5*stride
+      button(1,controls,'Shift',{kind='key_shift'},editing.shift and c.blue or c.gray)
+      button(7,controls,'Space',{kind='key_text',text=' '})
+      button(1,controls+stride,'Del',{kind='key_delete'})
+      button(6,controls+stride,'Clear',{kind='key_clear'})
+      button(1,h-2,' Save ',{kind='key_save'},c.blue)
+      button(8,h-2,'Cancel',{kind='key_cancel'})
+      statusLine(h)
     end
     -- Repaint only changed rows: periodic samples should not flash the screen
     -- or rewrite unchanged controls while the operator is typing.
@@ -250,11 +278,17 @@ function M.new(screen,c,clock)
         elseif action.kind=='scroll' then offset=math.max(0,offset+action.delta)
         elseif action.kind=='tab' then tab=action.name; offset=0; editing=nil
         elseif action.kind=='maintenance' then tab='Maintenance'; offset=0; editing=nil; return action
+        elseif action.kind=='key_text' then editing.text=(editing.replace and '' or editing.text)..action.text; editing.replace=false
+        elseif action.kind=='key_shift' then editing.shift=not editing.shift
+        elseif action.kind=='key_delete' then editing.text=editing.replace and '' or editing.text:sub(1,-2); editing.replace=false
+        elseif action.kind=='key_clear' then editing.text=''; editing.replace=false
+        elseif action.kind=='key_cancel' then editing=nil
+        elseif action.kind=='key_save' then local result={kind='setting',key=editing.key,value=editing.text}; editing=nil; return result
         elseif action.kind=='edit' then editing={key=action.key,text=value(api.config[action.key]),replace=true}
         else return action end
         return
       end end
-    elseif event=='mouse_scroll' then offset=math.max(0,offset+a)
+    elseif event=='mouse_scroll' and not editing then offset=math.max(0,offset+a)
     elseif event=='char' then
       if editing then editing.text=(editing.replace and '' or editing.text)..a; editing.replace=false
       elseif a:lower()=='e' then return {kind='emergency'}

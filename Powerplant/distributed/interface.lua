@@ -166,7 +166,7 @@ function M.run(R)
           screen.draw(cache)
           if output~='terminal' then
             local edit=screen.editing()
-            local text=edit and (edit.key..': '..edit.text..'\nEnter: save / Escape: cancel') or 'Transformer UI on '..output..'\nTouch monitor; type values here. E: emergency stop.'
+            local text=edit and (edit.key..': '..edit.text..'\nUse the monitor keyboard and Save/Cancel.') or 'Transformer UI on '..output..'\nAll controls and text entry are on the monitor. E: emergency stop.'
             if text~=lastEdit then term.clear(); term.setCursorPos(1,1); print(text); lastEdit=text end
           end
         end)

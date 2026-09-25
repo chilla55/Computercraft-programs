@@ -88,6 +88,29 @@ for _,width in ipairs({15,36,57,78}) do
  check(menu.event('mouse_click',1,1,actionRow)==nil,'busy maintenance allowed another test')
  d.maintenanceBusy=false
 end
+for _,size in ipairs({{15,19},{15,29},{36,29},{57,29}}) do
+ w,h=size[1],size[2]; d.config={target=2640}
+ local keyboard=UI.new(screen,c); keyboard.draw(d)
+ for _=1,3 do keyboard.event('mouse_click',1,w,w<45 and 3 or 2); keyboard.draw(d) end
+ keyboard.event('mouse_click',1,1,w<45 and 5 or 3); keyboard.draw(d)
+ local kw=math.max(1,math.floor(w/10)); local stride=h>=25 and 2 or 1
+ for _,index in ipairs({2,6,4,10}) do keyboard.event('mouse_click',1,1+(index-1)*kw,7) end
+ local saved=keyboard.event('mouse_click',1,1,h-2)
+ check(saved and saved.kind=='setting' and saved.key=='target' and saved.value=='2640','touch numeric entry failed')
+ keyboard.draw(d); keyboard.event('mouse_click',1,1,w<45 and 5 or 3); keyboard.draw(d)
+ local controls=7+5*stride
+ keyboard.event('mouse_click',1,1,controls); keyboard.draw(d) -- Shift
+ keyboard.event('mouse_click',1,1,7+stride) -- Q
+ keyboard.event('mouse_click',1,1,7+4*stride) -- underscore
+ keyboard.event('mouse_click',1,1+2*kw,7+4*stride) -- colon
+ keyboard.event('mouse_click',1,7,controls) -- space
+ check(keyboard.editing().text=='Q_: ','touch letters/punctuation/space failed')
+ keyboard.event('mouse_click',1,1,controls+stride)
+ check(keyboard.editing().text=='Q_:','touch delete failed')
+ check(keyboard.event('mouse_click',1,1,2).kind=='emergency','keyboard hides emergency stop')
+ keyboard.event('mouse_click',1,8,h-2)
+ check(keyboard.editing()==nil and d.config.target==2640,'touch cancel changed setting')
+end
 w=15; h=29
 -- The renderer may yield in a monitor write without blocking touch input.
 local tasks,actions={},{}

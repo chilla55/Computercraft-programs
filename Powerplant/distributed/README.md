@@ -25,7 +25,7 @@ wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powe
 install-transformer.lua
 ```
 
-To select an exact release, use `install-transformer.lua transformer distributed-1.1.17` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
+To select an exact release, use `install-transformer.lua transformer distributed-1.1.18` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
 
 The default installation folder is `transformer/`, which holds the original fallback and stable launcher and verifies every file against the GitHub release manifest. It does not replace an existing installation or alter startup scripts. HTTP must be enabled and GitHub accessible. Alternatively, copy all top-level `.lua` files from this directory into `transformer/` using a disk.
 
@@ -158,3 +158,6 @@ The master retains the latest **eight** test results (including failures and rep
 For a terminal-run C test, enter maintenance, stop the master's UI program, leave both workers running, and run `transformer/transformer.lua diagnose`. An optional second argument supplies the pre-exit gauge name for that test only: `transformer/transformer.lua diagnose powergrid_voltage_gauge_12`. Ctrl+T opens all breakers before writing the partial report. Restart `transformer/transformer.lua run` afterward.
 
 Run `lua Powerplant/distributed/tests/maintenance.lua` for the maintenance queue and bounded-log checks.
+
+
+Monitor settings entry uses an on-screen touch keyboard, including numbers, letters, Shift, peripheral-name punctuation, Space, Delete, Clear, Save and Cancel. No access to the computer keyboard is needed during normal monitor operation. Emergency stop remains visible while editing. Physical keyboard entry remains available as an alternative; hardware configuration changes still require maintenance isolation.
