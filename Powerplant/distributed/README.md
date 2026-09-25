@@ -86,9 +86,11 @@ Updates download and stage on all three computers while the current programs con
 
 All participants must stage the full release before the operator can successfully activate it. Each recipient checks open contacts and idle drives again before changing `active-release.json`. The old files are retained. Reboots start latched, requiring explicit Resume/reset. Mixed versions cannot authorize breaker closure; the operator can approve a retry of a partially completed rollout; workers already running the desired version acknowledge it without replacing their rollback pointer.
 
-### Migrating from distributed 1.0.0
+### First deployment
 
-The old `release.json` channel remains pinned to 1.0.0 because that version automatically activates updates without asking. It will **not** receive this change automatically. Explicitly stop the old programs and isolate the transformer, download the new installer, then run `install-transformer.lua transformer-v11` on all three computers. Use `transformer-v11/transformer.lua` for the configure/run commands above. Reconfigure all three for wired discovery; existing settings remain defaults. Keep the old installation for recovery and change any startup script to the new path deliberately. Do not run old and new workers together. Subsequent releases use staged files and UI approval.
+No distributed 1.0.0 installation has been deployed on this setup. Install the current version directly on all three computers using the installation steps above; no migration or intermediate version is needed. Stop the old standalone regulator and isolate the transformer before commissioning the new workers.
+
+The unused legacy `release.json` channel stays pinned to 1.0.0. The new installer and updater use `approved-release.json`, which requires operator approval for activation.
 
 For offline recovery, isolate the transformer and run:
 
