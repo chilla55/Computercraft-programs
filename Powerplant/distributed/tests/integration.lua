@@ -129,6 +129,32 @@ local function world(restore,thermalFault,options)
   end
   return W
 end
+-- Config offers bypass the heartbeat digest gate so the master can repair a
+-- same-revision mapping mismatch, but only while physically isolated and stopped.
+local function offerCase(change,expected,energized,badDigest,badSender)
+ local w=world()
+ w.untilTrue(function() return w.nodes[2].R.fresh('master')~=nil end,3)
+ local c=U.copy(cfg); change(c)
+ if energized then w.contacts.input=true end
+ local r=w.nodes[2].R
+ w.nodes[2].queue[#w.nodes[2].queue+1]={'rednet_message',badSender or 1,
+  {kind='config_offer',role='master',sentAt=w.time*1000,data={config=c},
+   digest=badDigest or r.modules.hash(U.canonical(c))},U.protocol}
+ w.untilTrue(function() return r.rebootRequested end,.15)
+ check((r.rebootRequested==true)==expected,'incorrect config offer acceptance')
+ if expected then check(r.node.config.settings.target==c.settings.target,'master config not adopted') end
+end
+offerCase(function(c) c.settings.target=2600 end,true)
+offerCase(function(c) c.settings.target=2600 end,false,true)
+offerCase(function(c) c.settings.target=2600 end,false,false,'bad')
+offerCase(function(c) c.ids.protection=9 end,false)
+offerCase(function(c) end,false)
+offerCase(function(c) c.settings.target=2600 end,false,false,nil,9)
+offerCase(function(c) c.revision=2; c.settings.target=2600 end,true)
+local older=world()
+older.nodes[2].R.config.revision=2
+older.untilTrue(function() return false end,.5)
+check(not older.nodes[2].R.rebootRequested,'older master config rolled worker back')
 local diagnostic=world(nil,nil,{lowStart=true})
 diagnostic.untilTrue(function() return diagnostic.nodes[3].R.fresh('regulation')~=nil end,3)
 diagnostic.nodes[1].R.state.diagnosticRequest='test-c'

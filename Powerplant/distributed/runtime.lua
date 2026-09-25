@@ -139,10 +139,11 @@ function M.new(config,node,modules,root)
         and m.role=='master' and U.finite(m.sentAt) and math.abs(R.now()-m.sentAt)<=2000 then
         local ok,why=pcall(function()
           local nextConfig=U.validate(m.data.config)
-          if nextConfig.revision<=config.revision then return end
+          if nextConfig.revision<config.revision then return end
+          if nextConfig.revision==config.revision and modules.hash(U.canonical(nextConfig))==R.digest then return end
           for _,role in ipairs(U.roles) do assert(nextConfig.ids[role]==config.ids[role],'Recommission changed computer IDs locally') end
           assert(modules.hash(U.canonical(nextConfig))==m.digest,'Configuration digest mismatch')
-          assert(R.state.latched and U.isolated(config.settings) and U.idle(config.settings),'Configuration requires maintenance')
+          assert(R.state.latched and not R.state.runRequested and not R.state.realignRequested and U.isolated(config.settings) and U.idle(config.settings),'Configuration requires maintenance')
           assert(U.isolated(nextConfig.settings) and U.idle(nextConfig.settings),'New mappings must also be isolated')
           node.config=nextConfig; U.write('distributed-node.json',node); R.rebootRequested=true
         end)

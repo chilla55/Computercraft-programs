@@ -16,6 +16,12 @@ Trips happen before network reporting or disk writes. Every breaker receives an 
 
 The workers retain configuration without the UI. Losing or restarting the UI does not disable their regulation. Losing a worker's fresh heartbeat while energized opens the breakers. Rebooted workers first isolate the transformer. If both workers persisted a running state, protection automatically starts a fresh cycle after checking fresh temperatures, absence of thermal faults, open contacts and idle drives. Regulation then repeats direction checks, homing/alignment and output tuning before protection closes the output. This also works while the UI is offline. A stopped, maintenance or faulted state stays stopped; an alignment-only fault may complete its isolated automatic recovery described below. Other trips cancel automatic restart. A worker restart while its counterpart is still operating can cause a protection trip, which requires manual reset. An active trip cannot be cleared by a heartbeat or a repeated old start cycle.
 
+## Configuration synchronization
+
+The master supplies configuration to both workers. From `distributed-1.1.26`, a worker also accepts different configuration contents at the same revision from its configured master; older revisions cannot overwrite newer settings. Acceptance requires a valid digest, unchanged computer IDs, no pending run or realignment, and open breakers and idle drives under both the old and new mappings. The worker saves the configuration and requests a reboot. Matching contents cause no reboot.
+
+If an older worker communicates with its counterpart but not the master, run the passive `tools/check-transformer-link.lua` diagnostic on the master after quitting its UI. Matching IDs/releases/revisions with `configMatches=false` means the mappings differ despite sharing a revision. Resync the configuration before attempting a coordinated upgrade. The diagnostic sends no control commands.
+
 ## Installation
 
 On **each** computer, from the computer root:
