@@ -1,5 +1,7 @@
 -- Initial HTTPS installer. Run from the computer root; no disk drive required.
-local directory=... or 'transformer'
+local directory,requestedRelease=...
+directory=directory or 'transformer'
+assert(requestedRelease==nil or (type(requestedRelease)=='string' and requestedRelease:match('^distributed%-%d+%.%d+%.%d+$')),'Use a release such as distributed-1.1.1')
 assert(type(directory)=='string' and directory:match('^[%w_-]+$'),'Use a simple installation directory name')
 assert(not fs.exists(directory),'Installation already exists; use the running updater instead')
 local hash=(function()
@@ -37,7 +39,11 @@ local function get(url)
   local f,reason=http.get(url,nil,true); assert(f,reason)
   local data=f.readAll(); f.close(); return data
 end
-local manifest=assert(textutils.unserializeJSON(get(repository..'main/Powerplant/distributed/approved-release.json')),'Invalid manifest')
+local ref=requestedRelease or 'main'
+local manifestUrl=repository..ref..'/Powerplant/distributed/approved-release.json'
+if not requestedRelease then manifestUrl=manifestUrl..'?check='..tostring(os.epoch('utc')) end
+local manifest=assert(textutils.unserializeJSON(get(manifestUrl)),'Invalid manifest')
+assert(not requestedRelease or manifest.version==requestedRelease,'Manifest does not match requested release')
 assert(manifest.schema==1 and type(manifest.version)=='string' and manifest.version:match('^distributed%-%d+%.%d+%.%d+$') and manifest.ref==manifest.version,'Invalid release tag')
 local names={'discovery','app','common','runtime','protection','regulation','planner','ui','interface','updater','sha256','thermal_protection','transformer'}
 local staging=directory..'-download'
