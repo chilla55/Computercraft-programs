@@ -70,4 +70,25 @@ check(P.stable({input=1450,output=2640},1452,2644),'small variation stalls live 
 check(not P.stable({input=1450,output=2640},1500,2644),'unstable input accepted')
 check(not P.stable({input=1450,output=2640},1450,2700),'unstable output accepted')
 check(not P.stable(nil,1450,2640),'first reading accepted without verification')
+-- Regression from the reported 1.1.22 incident: +/-1 degree is a local
+-- minimum despite reachable settings in a wider neighbourhood.
+local stuck={{position=284/315},{position=283/315},{position=284/315}}
+local localPlan=P.choose(settings,stuck,1447.419,2636.037,2640,1,nil,false,false)
+check(localPlan.err>=3.962,'fixture no longer reproduces the stalled local search')
+local recovered=P.feedback(settings,stuck,1447.419,2636.037,2640)
+check(recovered.recovery and recovered.err<.1,'reported local minimum did not recover preferred accuracy')
+local positions={284/315,283/315,284/315}; local voltage=2636.037
+for _,step in ipairs(recovered.steps) do
+ check(math.abs(step.degrees)==1,'fine recovery issued a large step')
+ local i=step.stage; local after=positions[i]+step.degrees/315
+ voltage=voltage*P.ratio(after)/P.ratio(positions[i]); positions[i]=after
+ check(voltage<=2641 and voltage>=2620,'fine recovery created an excessive predicted excursion')
+end
+check(math.abs(voltage-recovered.predicted)<1e-8,'interleaving changed the chosen destination')
+for _,case in ipairs({{2300,16},{2376,8},{2500,8},{2587.2,1},{2640,1},{2692.8,1},{2700,8},{2904,8},{3000,16}}) do
+ local plan=P.feedback(settings,stuck,1448.8,case[1],2640)
+ check(plan.limit==case[2],'wrong coarse/medium/fine error band')
+end
+local hold=P.feedback(settings,uneven,1500,target,target)
+check(hold.travel==0,'live feedback rebalanced unequal banks already at target')
 print(('PASS: %d calculated startup planner checks'):format(n))

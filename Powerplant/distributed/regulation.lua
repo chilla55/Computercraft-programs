@@ -95,27 +95,25 @@ function M.new(R)
     assert(math.abs(member.position-expected)*s.travelDegrees<=s.positionToleranceDegrees+1e-9,prefix..'; destination outside movement tolerance')
   end
   local function apply(plan)
-    for _,sign in ipairs({-1,1}) do
-      for i=1,3 do
-        if plan[i]*sign>0 then
-          U.aligned(s)
-          local before=U.positions(s)[i]; local after=move(i,math.abs(plan[i]),sign*directions[i],false)
-          for j,member in ipairs(after.members) do
-            local expected=math.max(0,math.min(1,before.members[j].position+plan[i]/s.travelDegrees))
-            verifyMovement(i,member,before.members[j].position,plan[i],expected)
-          end
-        end
+    local steps=plan.steps or {}
+    if not plan.steps then
+      for _,sign in ipairs({-1,1}) do
+        for i=1,3 do if plan[i]*sign>0 then steps[#steps+1]={stage=i,degrees=plan[i]} end end
+      end
+    end
+    for _,step in ipairs(steps) do
+      local i,delta=step.stage,step.degrees
+      U.aligned(s)
+      local before=U.positions(s)[i]
+      local after=move(i,math.abs(delta),(delta>0 and 1 or -1)*directions[i],false)
+      for j,member in ipairs(after.members) do
+        local expected=math.max(0,math.min(1,before.members[j].position+delta/s.travelDegrees))
+        verifyMovement(i,member,before.members[j].position,delta,expected)
       end
     end
   end
   local function feedbackPlan(banks,input,output,target,yieldFn,isolated)
-    local err=math.abs(output-target)
-    local limit=err>target*.02 and (isolated and 16 or 8) or 1
-    local plan=P.choose(s,banks,input,output,target,limit,yieldFn,false,false)
-    if isolated and limit==1 and err>s.fallbackVolts and (plan.travel==0 or plan.err>=err-.001 or plan.err>s.fallbackVolts) then
-      plan=P.choose(s,banks,input,output,target,16,yieldFn,false,false)
-    end
-    return plan
+    return P.feedback(s,banks,input,output,target,yieldFn,isolated)
   end
   local previousLive,unreachableSince
   local function tune()

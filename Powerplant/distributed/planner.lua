@@ -51,6 +51,51 @@ function M.choose(s,banks,input,output,target,limit,yieldFn,simultaneous,preferB
   end
   return assert(best,'No available variac setting')
 end
+-- Normal feedback uses three error bands. Widen a stalled fine search only
+-- outside fallback; accepting a local minimum is not a capacity test.
+function M.feedback(s,banks,input,output,target,yieldFn,isolated)
+  local err=math.abs(output-target)
+  local deviation=err/target
+  local limit=deviation>.10+1e-12 and 16 or deviation>.02+1e-12 and 8 or 1
+  local plan=M.choose(s,banks,input,output,target,limit,yieldFn,false,false)
+  plan.limit=limit
+  if isolated and limit==1 and err>s.fallbackVolts and (plan.travel==0 or plan.err>=err-.001 or plan.err>s.fallbackVolts) then
+    plan=M.choose(s,banks,input,output,target,16,yieldFn,false,false)
+  elseif not isolated and limit==1 and err>s.fallbackVolts and plan.err>=err-.001 then
+    for _,radius in ipairs({2,4,8,16}) do
+      local wider=M.choose(s,banks,input,output,target,radius,yieldFn,false,false)
+      if wider.err<plan.err-.001 then plan=wider; plan.recovery=true; plan.limit=radius end
+      if plan.err<=s.fallbackVolts then break end
+    end
+    if plan.recovery then plan.steps=M.recoverySteps(s,banks,output,target,plan) end
+  end
+  return plan
+end
+-- Interleave single-degree moves toward a wider destination. Choose the next
+-- predicted voltage nearest target without crossing above the initial/target
+-- ceiling. This avoids executing a whole lowering leg before compensation.
+function M.recoverySteps(s,banks,output,target,plan)
+  local positions,remaining,steps={},{},{}
+  for i=1,3 do positions[i]=banks[i].position; remaining[i]=plan[i] end
+  local ceiling=math.max(output,target,plan.predicted)+s.fallbackVolts
+  for n=1,plan.travel do
+    local best
+    for i=1,3 do
+      if remaining[i]~=0 then
+        local delta=remaining[i]>0 and 1 or -1
+        local predicted=output*M.ratio(positions[i]+delta/s.travelDegrees)/M.ratio(positions[i])
+        local err=math.abs(predicted-target)
+        if predicted<=ceiling and (not best or err<best.err) then best={stage=i,degrees=delta,predicted=predicted,err=err} end
+      end
+    end
+    assert(best,'No bounded path to fine recovery setting')
+    local i=best.stage
+    positions[i]=positions[i]+best.degrees/s.travelDegrees
+    remaining[i]=remaining[i]-best.degrees; output=best.predicted
+    steps[#steps+1]=best
+  end
+  return steps
+end
 -- Absolute destinations derived from one input snapshot. Whole-degree
 -- commands respect each shaft's current fractional-angle offset.
 function M.initial(s,banks,input,output,target,yieldFn,limit)

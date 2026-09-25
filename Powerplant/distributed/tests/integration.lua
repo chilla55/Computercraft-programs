@@ -385,6 +385,28 @@ for _,temperature in ipairs({140,126}) do
  for _,event in ipairs(hot.nodes[3].R.events) do if event.detail and event.detail.member=='a2' and event.code:match('^thermal_') then thermalReason=true end end
  check(thermalReason and not hot.nodes[3].R.state.realignRequested,'thermal fault missing member or incorrectly scheduled alignment recovery')
 end
+local recovery=world(nil,nil,{lowStart=true})
+recovery.untilTrue(function() return recovery.nodes[3].R.fresh('regulation')~=nil end,3); recovery.command('start')
+check(recovery.untilTrue(function() return recovery.nodes[2].R.state.phase=='live' end,60),'recovery fixture failed startup')
+for name,angle in pairs({a1=284,a2=284,b1=283,c1=284}) do recovery.positions[name]=angle/315 end
+local function recoveryOutput()
+ local v=3750*(recovery.loadScale or 1)
+ for _,name in ipairs({'a1','b1','c1'}) do v=v*(.00999996389330349+.989990071137444*recovery.positions[name]) end
+ return v
+end
+recovery.loadScale=2636.037/recoveryOutput(); recovery.inputVoltage=1447.419
+check(recovery.untilTrue(function() return math.abs(recoveryOutput()-2640)<.1 and not next(recovery.motion) end,60),'reported fine-search minimum failed live recovery')
+check(recovery.nodes[2].R.state.phase=='live','fine recovery tripped')
+for _,m in ipairs(recovery.moves) do if m.phase=='live' then check(m.degrees==1,'fine recovery did not interleave single-degree commands') end end
+local moveCount=#recovery.moves
+recovery.loadScale=recovery.loadScale*.8
+check(recovery.untilTrue(function() return math.abs(recoveryOutput()-2640)<=1 and not next(recovery.motion) end,60),'large sag failed recovery')
+local large=false
+for i=moveCount+1,#recovery.moves do
+ local m=recovery.moves[i]; check(m.degrees<=16,'large recovery exceeded 16-degree bound')
+ if m.degrees>8 then large=true end
+end
+check(large,'large sag never exercised the new coarse band')
 local badInput=world(nil,nil,{lowStart=true,invalidRegulationInput=true})
 badInput.untilTrue(function() return badInput.nodes[3].R.fresh('regulation')~=nil end,3); badInput.command('start')
 check(badInput.untilTrue(function() return badInput.nodes[2].R.state.phase=='tripped' end,60),'invalid regulation reading did not trip')
