@@ -1,12 +1,12 @@
 {
   "files": {
     "app.lua": {
-      "sha256": "521f18f64d25f3caf751b86df3cc693cb1d95cf911450f2c1b19653463d06fd6",
-      "size": 9982
+      "sha256": "46d5b9d23b8ba8a6f93f16915a0a9725b0b30bd6fcdabad5ce45ba5dc70ceb1c",
+      "size": 10168
     },
     "common.lua": {
-      "sha256": "0c0fa1c410fd4fbfdaf127659527b5bca44c9d13ef8e3bf91cf63e85e2c61f1b",
-      "size": 12487
+      "sha256": "a075ce9769b9a8d094620d7d94a52b86c867952de97eb9d0ca667fcbc84764c1",
+      "size": 13310
     },
     "discovery.lua": {
       "sha256": "865af6c3eecf0e8f293b64906967e88f86fc50223f88453bfc857ad2d716b761",
@@ -21,16 +21,16 @@
       "size": 1708
     },
     "protection.lua": {
-      "sha256": "3172775ab2836917fea50e33a6088f9c2b7494cf4940278f71f84779a900a345",
-      "size": 7807
+      "sha256": "df2353d9af90c57a96f85feff73d5209e70d113f449982334275ec83b758b93a",
+      "size": 8701
     },
     "regulation.lua": {
       "sha256": "2a42235fe78819c3386c99bd32f5bba40715d496d4ddbc03167547da4443274a",
       "size": 6438
     },
     "runtime.lua": {
-      "sha256": "a69ca6ed89615e41a3574c7dfa7edbabcfcc3ae0b96fa2debcd51dc8d973e669",
-      "size": 10445
+      "sha256": "881bf0f3857a7e0e97f42d730c81486bf7fe97e94416766f6cc8a8ba8239c5c7",
+      "size": 10838
     },
     "sha256.lua": {
       "sha256": "d85c2a76d06b2ee814e26780347245f5a1780fe3bd7569663692e6e7433149e2",
@@ -41,19 +41,19 @@
       "size": 9041
     },
     "transformer.lua": {
-      "sha256": "c619a55935878fba93344deeb065f7c8b3458bba5983e45c8df9cc1844db3bd9",
-      "size": 2249
+      "sha256": "49c11d607402130cffe86d8acc71126aa9a64620cb5301521ff1a003b79a727e",
+      "size": 2565
     },
     "ui.lua": {
       "sha256": "7670db1a6296b22fe2546c13cf13f1c2833a9bfdd990231f282a2e80f48584c5",
       "size": 11435
     },
     "updater.lua": {
-      "sha256": "0f693c3391654b5132cde09ffde634a13a794b37b4557c40db47b8295c99aa89",
-      "size": 12182
+      "sha256": "bde29be11f4ed2ff7c2ee720ab4200cc05af13a88f7729e76f76d6ce055b6234",
+      "size": 13751
     }
   },
-  "ref": "distributed-1.1.2",
+  "ref": "distributed-1.1.3",
   "schema": 1,
-  "version": "distributed-1.1.2"
+  "version": "distributed-1.1.3"
 }

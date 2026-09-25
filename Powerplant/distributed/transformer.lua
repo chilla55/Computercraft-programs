@@ -3,11 +3,19 @@ local command,role=...
 local root=fs.getDir(shell.getRunningProgram())
 local pointer=fs.combine(root,'active-release.json')
 local function read(path)
+  if path=='distributed-node.json' then
+    local destination='/config/'..path
+    if fs.exists(destination) or fs.exists(destination..'.tmp') then path=destination end
+  end
   local p=fs.exists(path..'.tmp') and path..'.tmp' or path
   if not fs.exists(p) then return nil end
   local f=assert(fs.open(p,'r')); local result=textutils.unserializeJSON(f.readAll()); f.close(); return assert(result,'Invalid '..p)
 end
 local function write(path,v)
+  if path=='distributed-node.json' then
+    if not fs.exists('/config') then fs.makeDir('/config') end
+    path='/config/'..path
+  end
   local f=assert(fs.open(path..'.tmp','w')); f.write(textutils.serializeJSON(v)); f.close()
   if fs.exists(path) then fs.delete(path) end; fs.move(path..'.tmp',path)
 end
@@ -24,9 +32,9 @@ local function isolated()
   for _,key in ipairs({'A','B','C'}) do assert(peripheral.wrap(s['gear'..key]).isRunning()==false,'Wait for drives before rollback') end
 end
 if command=='rollback' then
-  assert(active and active.previous,'No previous release'); isolated()
-  local previous=active.previous
-  active={version=previous,previous=active.version,pending=false}; write(pointer,active)
+  assert(active and active.version~='bundled','Already using the original installed fallback'); isolated()
+  local previous='bundled'
+  active={version=previous,pending=false}; write(pointer,active)
   local node=read('distributed-node.json'); node.autoUpdate=false; write('distributed-node.json',node)
   print('Selected '..previous..'; automatic updates disabled locally. Run transformer.lua run to start stopped.'); return
 end

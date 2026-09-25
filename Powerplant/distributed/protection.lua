@@ -125,6 +125,22 @@ function M.new(R)
     while true do
       local ok,why=pcall(function()
         check()
+        if R.bootResume and R.state.latched and thermalReady then
+          local peer=R.fresh('regulation')
+          if peer then
+            if not peer.runRequested or peer.phase=='tripped' then
+              R.trip('auto_resume_blocked','Regulation did not request automatic restart; use Resume/reset')
+            elseif peer.latched and U.isolated(s) and U.idle(s) then
+              R.bootResume=false -- one boot attempt; no repeated automatic resets
+              local fault=policy.check(R.now()/1000)
+              if fault then R.trip(fault.code,fault.reason,fault)
+              else
+                local accepted,reason=pcall(command,{kind='start',data={}})
+                if not accepted then R.trip('auto_resume_blocked',tostring(reason)) end
+              end
+            end
+          else R.state.message='Waiting for regulation before automatic restart.' end
+        end
         local m=R.commands[1]
         if m and (m.kind~='start' or thermalReady) then
           table.remove(R.commands,1)

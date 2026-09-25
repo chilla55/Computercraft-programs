@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.2',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.3',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 M.fields={
   inputGauge={label="Voltage entering variacs",help="Required. Voltage gauge AFTER the entry transformer, BEFORE stage A."},
@@ -45,13 +45,25 @@ function M.canonical(v)
   local out={'{'}; for _,k in ipairs(keys) do out[#out+1]=M.canonical(k)..'='..M.canonical(v[k])..';' end
   out[#out+1]='}'; return table.concat(out)
 end
+local configFiles={['distributed-node.json']=true,['distributed-state.json']=true,['distributed-thermal.json']=true,['dual-variac-config.json']=true}
+function M.configPath(path) return configFiles[path] and '/config/'..path or path end
 function M.read(path)
+  local original=path; path=M.configPath(path)
   local recovery=fs.exists(path..'.tmp') and path..'.tmp' or path
-  if not fs.exists(recovery) then return nil end
+  if not fs.exists(recovery) then
+    -- One-time import keeps the original as a backup, including its recovery file.
+    local legacy=fs.exists(original..'.tmp') and original..'.tmp' or original
+    if path==original or not fs.exists(legacy) then return nil end
+    local f=assert(fs.open(legacy,'r')); local text=f.readAll(); f.close()
+    local value=assert(textutils.unserializeJSON(text),'Invalid JSON: '..legacy)
+    M.write(path,value); return value
+  end
   local f=assert(fs.open(recovery,'r')); local text=f.readAll(); f.close()
   return assert(textutils.unserializeJSON(text),'Invalid JSON: '..path)
 end
 function M.write(path,value)
+  path=M.configPath(path)
+  local parent=fs.getDir(path); if parent~='' and not fs.exists(parent) then fs.makeDir(parent) end
   local f=assert(fs.open(path..'.tmp','w')); f.write(textutils.serializeJSON(value)); f.close()
   if fs.exists(path) then fs.delete(path) end
   fs.move(path..'.tmp',path)

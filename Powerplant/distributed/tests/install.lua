@@ -1,6 +1,6 @@
 local hash=dofile('Powerplant/distributed/sha256.lua')
 local count=0; local function check(v,m) assert(v,m); count=count+1 end
-local function run(requested,served)
+local function run(requested,served,directory)
  local urls,files={},{}; local moved=false
  local body='return {}'
  local manifest={schema=1,version=served,ref=served,files={}}
@@ -11,7 +11,8 @@ local function run(requested,served)
  fs={exists=function() return false end,makeDir=function() end,combine=function(a,b) return a..'/'..b end,
  open=function(path) return {write=function(bytes) files[path]=bytes end,close=function() end} end,
  move=function() moved=true end}}, {__index=_G})
- local ok=pcall(assert(loadfile('Powerplant/distributed/install.lua','t',env)),'fresh',requested)
+ local folder=directory or 'fresh'; if directory==false then folder=nil end
+ local ok=pcall(assert(loadfile('Powerplant/distributed/install.lua','t',env)),folder,requested)
  return ok,urls,files,moved
 end
 local ok,urls,files,moved=run('distributed-1.1.1','distributed-1.1.1')
@@ -24,4 +25,8 @@ check(not wrong and not activated,'wrong version installed')
 local latest,latestUrls=run(nil,'distributed-1.1.1')
 check(latest and latestUrls[1]:find('?check=123456',1,true),'latest manifest can reuse stale URL')
 check(not run('../main','distributed-1.1.1'),'invalid release accepted')
+local versioned,_,versionFiles=run('distributed-1.1.1','distributed-1.1.1','fresh-1.1.1')
+check(versioned and versionFiles['fresh-1.1.1-download/app.lua'],'explicit installation folder changed')
+local defaultOk,_,defaultFiles=run('distributed-1.1.1','distributed-1.1.1',false)
+check(defaultOk and defaultFiles['transformer-download/app.lua'],'default fallback folder is not transformer')
 print(('PASS: %d installer checks'):format(count))

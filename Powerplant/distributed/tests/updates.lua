@@ -3,7 +3,12 @@ local Update=dofile(base..'updater.lua'); local hash=dofile(base..'sha256.lua')
 local count=0; local function check(v,m) assert(v,m); count=count+1 end
 local files,records={},{}
 fs={exists=function(p) return files[p]~=nil end,combine=function(a,b) return a..'/'..b end,
- makeDir=function(p) files[p]=true end,delete=function(p) for k in pairs(files) do if k==p or k:sub(1,#p+1)==p..'/' then files[k]=nil end end end,
+ list=function(p)
+  local result,seen={},{}; for k in pairs(files) do
+   if k:sub(1,#p+1)==p..'/' then local name=k:sub(#p+2):match('^[^/]+'); if not seen[name] then result[#result+1]=name; seen[name]=true end end
+  end; return result
+ end,
+ makeDir=function(p) files[p]=true; local parent=p:match('^(.*)/'); if parent then files[parent]=true end end,delete=function(p) for k in pairs(files) do if k==p or k:sub(1,#p+1)==p..'/' then files[k]=nil end end end,
  open=function(p,mode) if mode=='r' and not files[p] then return nil end; local body='' return {
    write=function(v) body=body..v end,readAll=function() return files[p] end,close=function() if mode=='w' then files[p]=body end end} end}
 local isolated,idle=true,true
@@ -72,4 +77,36 @@ check(not pcall(api.apply),'unstaged worker accepted')
 R.updatePeer=function() return {latched=true,updateReady=manifest.version},'distributed-1.0.0' end
 api.approve(manifest.version); api.apply()
 check(activated==2 and R.rebootRequested,'approved isolated rollout failed')
+-- Bound storage to the original fallback, current release, and one pending.
+local B={role='protection',root='bounded',state={latched=true},config=R.config,modules=R.modules,now=R.now,
+ U={release='distributed-1.0.1',isolated=R.U.isolated,idle=R.U.idle,read=R.U.read,write=R.U.write}}
+files['bounded/app.lua']='original fallback'; files['bounded/transformer.lua']='stable launcher'
+files['bounded/releases']=true
+files['bounded/releases/distributed-1.0.0']=true
+files['bounded/releases/distributed-1.0.1']=true
+files['bounded/releases/distributed-1.0.1/common.lua']=body
+files['bounded/releases/notes']='user file'
+records['bounded/active-release.json']={version='distributed-1.0.1',previous='distributed-1.0.0'}
+local bounded=Update.new(B)
+check(not files['bounded/releases/distributed-1.0.0'] and files['bounded/releases/distributed-1.0.1'],'boot cleanup removed active or retained old release')
+check(records['bounded/active-release.json'].previous=='bundled' and files['bounded/app.lua']=='original fallback','fixed fallback lost')
+local function stageVersion(version)
+ local m={schema=1,version=version,ref=version,files=manifest.files}
+ bounded.receive(1,{kind='update_begin',data={manifest=m}})
+ for name in pairs(m.files) do
+  bounded.receive(1,{kind='update_chunk',data={name=name,index=1,body=body}})
+  bounded.receive(1,{kind='update_file',data={name=name}})
+ end
+ bounded.receive(1,{kind='update_finish',data={}})
+end
+stageVersion('distributed-1.0.2'); stageVersion('distributed-1.0.3')
+check(not files['bounded/releases/distributed-1.0.2'] and files['bounded/releases/distributed-1.0.3'],'superseded pending update retained')
+check(files['bounded/releases/distributed-1.0.1/common.lua']==body and files['bounded/releases/notes']=='user file','staging deleted active/unrelated files')
+bounded.receive(1,{kind='update_activate',data={version='distributed-1.0.3',approved=true,approvalId='yes'}})
+check(files['bounded/releases/distributed-1.0.1'],'activation deleted still-running version')
+check(not pcall(stageVersion,'distributed-1.0.4'),'staging allowed during restart')
+B.U.release='distributed-1.0.3'; B.rebootRequested=nil; B.state={latched=true}
+bounded=Update.new(B)
+check(not files['bounded/releases/distributed-1.0.1'] and files['bounded/releases/distributed-1.0.3'],'new boot did not prune superseded running version')
+check(files['bounded/app.lua']=='original fallback' and records['bounded/active-release.json'].previous=='bundled','fallback changed after upgrade')
 print(('PASS: %d staged-update checks'):format(count))

@@ -53,10 +53,36 @@ function M.new(R)
   local function isolated()
     assert(R.state.latched and U.isolated(R.config.settings) and U.idle(R.config.settings),'Applying an update requires maintenance isolation')
   end
+  local function prune(keepPending)
+    local current=U.read(fs.combine(R.root,'active-release.json'))
+    -- A pointer may already select the next release while this process waits
+    -- to reboot. Never clean up either version during that interval.
+    if current and current.version~='bundled' and current.version~=U.release then return end
+    if current and current.version~='bundled' and current.previous~='bundled' then
+      current.previous='bundled'; U.write(fs.combine(R.root,'active-release.json'),current)
+    end
+    local directory=fs.combine(R.root,'releases')
+    if not fs.exists(directory) then return end
+    for _,name in ipairs(fs.list(directory)) do
+      if name:match('^distributed%-%d+%.%d+%.%d+$') and name~=U.release and name~=keepPending then
+        fs.delete(fs.combine(directory,name))
+      end
+    end
+  end
   local function begin(m)
-    manifest=M.validate(m); staging=fs.combine(R.root,'releases/'..manifest.version)
+    local nextManifest=M.validate(m)
+    assert(not R.rebootRequested,'Restart pending; cannot replace staged files')
     -- Never replace the active release, even if its tag was republished.
-    assert(M.newer(manifest.version,U.release),'Refusing same-version replacement or automatic downgrade')
+    assert(M.newer(nextManifest.version,U.release),'Refusing same-version replacement or automatic downgrade')
+    local current=U.read(fs.combine(R.root,'active-release.json'))
+    assert(not current or current.version=='bundled' or current.version==U.release,'Active release changed; restart before staging')
+    R.state.updateReady=nil; R.state.updateDeferred=nil; approval=nil
+    pending=nil; manifest=nil
+    -- Invalidate the old staging record before deleting its files, including
+    -- its interrupted-write recovery record. The bundled fallback is untouched.
+    for _,path in ipairs({savedPath,savedPath..'.tmp'}) do if fs.exists(path) then fs.delete(path) end end
+    prune(nextManifest.version)
+    manifest=nextManifest; staging=fs.combine(R.root,'releases/'..manifest.version)
     if fs.exists(staging) then fs.delete(staging) end; fs.makeDir(staging)
     pending=M.receiver(manifest,R.modules.hash,function(name,body)
       local f=assert(fs.open(fs.combine(staging,name),'w')); f.write(body); f.close()
@@ -89,12 +115,13 @@ function M.new(R)
     if saved.deferred then R.state.updateDeferred=m.version end
   end)
   if not restored then pending=nil; manifest=nil; R.state.updateMessage='Staged update needs download again: '..tostring(restoreError) end
+  prune(manifest and manifest.version)
   local function activate(version)
     isolated(); assert(manifest and version==manifest.version and pending and pending.complete(),'Incomplete staged update')
     verifyFiles()
     local current=U.read(fs.combine(R.root,'active-release.json'))
     if not current or current.version~=version then
-      U.write(fs.combine(R.root,'active-release.json'),{version=version,previous=current and current.version or 'bundled',pending=true})
+      U.write(fs.combine(R.root,'active-release.json'),{version=version,previous='bundled',pending=true})
     end
     R.rebootAt=R.now()+1000; R.rebootRequested=true
   end

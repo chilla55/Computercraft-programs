@@ -8,15 +8,18 @@ function M.new(config,node,modules,root)
   R.session=tostring(os.getComputerID())..':'..R.now()..':'..math.random(1,2147483647)
   local counter=0
   R.token=function() counter=counter+1; return R.session..':'..counter end
-  R.state={latched=true,phase='stopped',generation=0,target=config.settings.target,events=R.events}
+  R.state={latched=true,phase='stopped',generation=0,target=config.settings.target,events=R.events,runRequested=false}
   local saved=U.read('distributed-state.json')
   if saved then
     assert(type(saved)=='table' and type(saved.events)=='table','Invalid saved state')
     R.state.target=saved.target or R.state.target
+    R.state.runRequested=saved.runRequested==true or (saved.runRequested==nil and saved.latched==false)
+    R.bootResume=R.state.runRequested
+    if not R.state.runRequested then R.state.phase=saved.phase or 'stopped' end
     for _,event in ipairs(saved.events) do R.events[#R.events+1]=event; R.eventIndex[event.id]=true end
   end
   assert(U.finite(R.state.target) and R.state.target>0 and R.state.target/(config.settings.stepUp*.99999^3)<config.settings.maxInputVolts,'Saved target outside current configuration limits')
-  function R.persist() U.write('distributed-state.json',{target=R.state.target,events=R.events,latched=R.state.latched}) end
+  function R.persist() U.write('distributed-state.json',{target=R.state.target,events=R.events,latched=R.state.latched,runRequested=R.state.runRequested,phase=R.state.phase}) end
   function R.send(role,kind,data)
     R.sequence=R.sequence+1
     pcall(rednet.send,config.ids[role],{schema=1,revision=config.revision,release=U.release,role=R.role,
@@ -53,6 +56,7 @@ function M.new(config,node,modules,root)
   function R.trip(code,reason,detail,remote)
     local requestedAt=R.now()
     local repeated=not remote and R.state.latched and R.lastLocalFault==tostring(code)..':'..tostring(reason)
+    R.bootResume=false; R.state.runRequested=false
     R.state.latched=true; R.state.phase='tripped'; R.state.generation=R.state.generation+1; R.commands={}
     local opened,why=U.openAll(config.settings) -- No network or disk prerequisite.
     if repeated then R.state.message=not opened and why or R.state.message; return end
@@ -65,7 +69,7 @@ function M.new(config,node,modules,root)
     end
     if R.record(event) then R.publish('trip',event); R.persist() end
   end
-  function R.clearFaults() R.lastLocalFault=nil; R.state.latched=false; R.state.generation=R.state.generation+1 end
+  function R.clearFaults() R.bootResume=false; R.state.runRequested=true; R.lastLocalFault=nil; R.state.latched=false; R.state.generation=R.state.generation+1 end
   function R.heartbeat()
     while true do
       local ok=pcall(function()

@@ -35,7 +35,7 @@ local function installStartup()
   end
   fs.move('/transformer-startup.tmp','/startup.lua')
   if settings then settings.set('shell.allow_startup',true); settings.save() end
-  print('Autostart enabled: '..node.role..'. Workers still boot stopped; Resume/reset is required to energize.')
+  print('Autostart enabled: '..node.role..'. Previously running workers restart through the normal safety checks.')
 end
 local function configure()
   local role=requestedRole or prompt('Role: master, regulation, protection',node and node.role or 'master')
@@ -137,7 +137,11 @@ U.validate(node.config); assert(node.config.ids[node.role]==os.getComputerID(),'
 if node.role~='master' or command=='trip' then
   local isolated,reason=U.openAll(node.config.settings); assert(isolated,reason)
 end
-if command=='trip' then print('All configured breakers verified open.'); return end
+if command=='trip' then
+  local saved=U.read('distributed-state.json')
+  if saved then saved.runRequested=false; saved.latched=true; U.write('distributed-state.json',saved) end
+  print('All configured breakers verified open; automatic restart disabled.'); return
+end
 D.open(node.modem); D.host(node.config.cluster or 'transformer',node.role)
 assert(command==nil or command=='run','Use configure, run, trip or rollback')
 local modules={common=U,thermal=module('thermal_protection'),planner=module('planner'),hash=module('sha256'),ui=module('ui'),updater=module('updater')}

@@ -10,7 +10,7 @@ local settings={target=2640,stepUp=2.5,entryRatio=5,travelDegrees=315,maxInputVo
   inputGauge='vin',outputGauge='vout',sourceGauge='',preStepUpGauge='',sourceCurrentGauge='',sourcePowerGauge='',sourceCurrentTripAmps=0,
   variacsA={'a1','a2'},variacsB={'b1'},variacsC={'c1'},gearA='ga',gearB='gb',gearC='gc',pollSeconds=.1,settleSeconds=.2}
 local cfg={schema=1,revision=1,ids={master=1,regulation=2,protection=3},settings=settings}
-local function world()
+local function world(restore,thermalFault)
   local W={time=0,nodes={},contacts={input=false,plus=false,minus=false},positions={a1=.8,a2=.5,b1=.9,c1=.98},temperature={},moves={},closes={},drop={}}
   local function serialize(v)
     if type(v)=='string' then return string.format('%q',v) end
@@ -19,6 +19,8 @@ local function world()
   end
   for _,role in ipairs(U.roles) do
     local N={id=cfg.ids[role],role=role,queue={},timers={},files={},timer=0}; W.nodes[N.id]=N
+    if restore then N.files['/config/distributed-state.json']=serialize(restore[role] or {events={},latched=true,runRequested=false}) end
+    if thermalFault and role=='protection' then N.files['/config/distributed-thermal.json']=serialize({version=2,members={},fault={code='thermal_overtemperature',reason='Saved thermal trip'}}) end
     local env=setmetatable({}, {__index=_G}); env._G=env
     env.os={epoch=function() return W.time*1000 end,clock=function() return W.time end,getComputerID=function() return N.id end,
       startTimer=function(seconds) N.timer=N.timer+1; N.timers[N.timer]=W.time+seconds; return N.timer end,
@@ -41,7 +43,7 @@ local function world()
       end
     end}
     env.textutils={serializeJSON=serialize,unserializeJSON=function(s) local f=load('return '..s,'json','t',{}); return f and f() end}
-    env.fs={exists=function(path) return N.files[path]~=nil end,getDir=function(p) return p:match('^(.*)/') or '' end,combine=function(a,b) return a=='' and b or a..'/'..b end,
+    env.fs={makeDir=function(path) N.files[path]=true end,exists=function(path) return N.files[path]~=nil end,getDir=function(p) return p:match('^(.*)/') or '' end,combine=function(a,b) return a=='' and b or a..'/'..b end,
       delete=function(path) N.files[path]=nil end,move=function(a,b) N.files[b]=assert(N.files[a]); N.files[a]=nil end,
       open=function(path,mode) local value='' return {readAll=function() return assert(N.files[path]) end,write=function(s) value=value..s end,close=function() if mode~='r' then N.files[path]=value end end} end}
     env.rednet={isOpen=function() return true end,open=function() end,
@@ -146,4 +148,16 @@ check(not event('observation').resolvedBy,'later trip falsely explained an earli
 ledger.record({id='earlier',origin='master',code='emergency_stop',reason='Operator stop',cycle='correlation',commandedAt=400})
 check(event('observation').resolvedBy=='earlier','delayed earlier command did not explain opening')
 check(event('later') and event('earlier') and event('observation'),'multiple reasons lost during merge')
+-- Boot from a persisted running state without a UI start command.
+local previouslyRunning={regulation={events={},latched=false,runRequested=true},protection={events={},latched=false,runRequested=true}}
+local resumed=world(previouslyRunning); resumed.drop.master=true
+check(resumed.untilTrue(function() return resumed.nodes[2].R.state.phase=='live' end,150),'previously running workers failed automatic startup without UI')
+check(resumed.contacts.input and resumed.contacts.plus and resumed.contacts.minus,'automatic startup did not connect')
+local stopped=world({regulation={events={},latched=true,runRequested=false},protection={events={},latched=true,runRequested=false}})
+stopped.untilTrue(function() return false end,3)
+check(not stopped.contacts.input and #stopped.closes==0,'maintenance reboot reconnected')
+local blocked=world(previouslyRunning,true)
+blocked.untilTrue(function() return false end,3)
+check(#blocked.closes==0 and not blocked.nodes[3].R.state.runRequested,'automatic startup cleared thermal fault')
+check(W.nodes[3].R.state.runRequested==false,'trip did not clear restart intent')
 print(('PASS: %d distributed integration checks'):format(checks))
