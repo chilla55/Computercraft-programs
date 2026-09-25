@@ -3,10 +3,24 @@ function M.run(R)
   local U,s=R.U,R.config.settings
   local output,screen,width,height,dirty
   dirty=true
+  local nextMonitorSearch=0
   local function selectOutput()
     local target=term
     if R.role=='master' and R.node.monitor then
       local candidate=peripheral.wrap(R.node.monitor)
+      if not (candidate and candidate.setTextScale) and R.now()>=nextMonitorSearch then
+        nextMonitorSearch=R.now()+2000
+        local found={}
+        for _,name in ipairs(peripheral.getNames()) do
+          if peripheral.hasType(name,'monitor') then found[#found+1]=name end
+        end
+        if #found==1 then
+          R.node.monitor=found[1]; candidate=peripheral.wrap(found[1])
+          local saved,why=pcall(U.write,'distributed-node.json',R.node)
+          R.state.message=saved and 'Reconnected monitor '..found[1] or 'Monitor reconnected; configuration save failed: '..tostring(why)
+        elseif #found>1 then R.state.message='Configured monitor missing; multiple monitors found. Select one in configure.'
+        else R.state.message='Monitor disconnected; using computer display until it returns.' end
+      end
       if candidate and candidate.setTextScale then target=candidate end
     end
     -- Peripheral wrappers are recreated by wrap; compare the selected name.
