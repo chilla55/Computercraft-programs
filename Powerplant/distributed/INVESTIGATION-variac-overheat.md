@@ -126,3 +126,24 @@ validated fix for this destruction. Keep the affected installation isolated;
 validate suspected mod defects in an isolated test world before another
 energized production movement test. No runtime tuning or protection thresholds
 were changed as part of this investigation.
+
+## Existing-peripheral inspection
+
+The operator prefers existing peripherals; no addon method is required by this
+check. `tools/inspect-variac-bank.lua` is a standalone, read-only preliminary
+inspection. On the master, enter maintenance, quit the UI to its shell, and run:
+
+```
+wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powerplant/distributed/tools/inspect-variac-bank.lua inspect-variac-bank.lua
+inspect-variac-bank C
+```
+
+Keep the workers running in maintenance. The script requires all configured
+breakers open and gearboxes idle before collecting samples, checks again between
+sample rounds, and issues no opening, closing or movement commands. It captures
+three position/thermal samples per configured bank member and method names.
+Missing members are recorded without skipping healthy members. Report:
+`/config/variac-bank-inspection.json` (overwritten by the next inspection).
+This does not establish alignment during energized motion or expose internal
+solver state. It is a baseline for deciding whether an isolated mechanical test
+is appropriate, not a request to repeat the destructive energized test.
