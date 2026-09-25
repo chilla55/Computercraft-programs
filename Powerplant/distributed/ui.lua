@@ -1,5 +1,26 @@
 -- Local advanced-computer UI. Hardware stays owned by transformer_controller.
 local M={}
+-- Source-side readings only; do not substitute the post-entry voltage.
+-- Display magnitude: gauge orientation must not turn consumption negative.
+function M.sourcePower(data)
+  local voltage=data.voltages and data.voltages.source
+  local current=data.sourceMeters and data.sourceMeters.current
+  local function finite(v) return type(v)=='number' and v==v and math.abs(v)<math.huge end
+  if not voltage or not current or not voltage.available or not current.available
+    or not finite(voltage.volts) or not finite(current.amps) then return nil end
+  local watts=math.abs(voltage.volts*current.amps)
+  return finite(watts) and watts or nil
+end
+function M.sourcePowerReading(data)
+  local measured=data.sourceMeters and data.sourceMeters.power
+  local watts=measured and measured.watts
+  if measured and measured.available and type(watts)=='number' and watts==watts and math.abs(watts)<math.huge then
+    return math.abs(watts),'Measured'
+  end
+  local calculated=M.sourcePower(data)
+  if calculated~=nil then return calculated,'Calculated' end
+  return nil,'Unavailable'
+end
 function M.new(screen,c,clock)
   clock=clock or os.clock
   local tab,offset,editing='Diagram',0,nil
@@ -81,8 +102,15 @@ function M.new(screen,c,clock)
     end
     local rows,actions={},{}
     local function row(text) rows[#rows+1]=text end
+    local sourcePower,powerStatus=M.sourcePowerReading(data)
+    local powerText=sourcePower and string.format('%.2f kW',sourcePower/1000) or '--'
+    local sourceAmps=data.sourceMeters and data.sourceMeters.current
+    sourceAmps=sourceAmps and sourceAmps.available and sourceAmps.amps or nil
     if compact and tab=='Diagram' then
       row('Source '..fmt(data.sourceVoltage,'V'))
+      row('Current '..fmt(sourceAmps,'A'))
+      row('Source power: '..powerText)
+      row(powerStatus)
       row(' | Gap 7500V')
       row('Input breakers')
       for _,breaker in ipairs(data.inputBreakers) do row(' '..(breaker.available and breaker.status and (breaker.status.closed and 'CLOSED' or 'OPEN') or '?')) end
@@ -99,6 +127,9 @@ function M.new(screen,c,clock)
       row('Tgt '..fmt(data.nominalTarget,'V'))
     elseif tab=='Diagram' then
       row('Generator / source '..fmt(data.sourceVoltage,' V'))
+      row('Source current '..fmt(sourceAmps,' A'))
+      row('Source power: '..powerText)
+      row(powerStatus)
       row('  | Spark gap 7500 V (generator protection)')
       row('  | Input isolation breakers: '..#data.inputBreakers)
       for _,b in ipairs(data.inputBreakers) do row('    '..b.name..': '..(b.available and b.status and (b.status.closed and 'CLOSED' or 'OPEN') or 'UNKNOWN')) end
@@ -121,11 +152,13 @@ function M.new(screen,c,clock)
         end
       end
     elseif tab=='Gauges' then
+      row('Source power: '..powerText)
+      row(powerStatus)
       for _,key in ipairs({'source','input','preStepUp','output'}) do
         local sample=data.voltages[key]; if compact then row(key); row(fmt(sample.volts,' V')) else row(key..': '..fmt(sample.volts,' V')) end
         row(' '..tostring(sample.peripheral or 'unassigned')..(sample.available and '' or ' [unavailable]'))
       end
-      for _,key in ipairs({'current','power'}) do
+      for _,key in ipairs({'current'}) do
         local sample=data.sourceMeters[key]; if compact then row('Source '..key); row(fmt(sample.amps or sample.watts,key=='current' and ' A' or ' W')) else row('Source '..key..': '..fmt(sample.amps or sample.watts,key=='current' and ' A' or ' W')) end
         row(' '..tostring(sample.peripheral or 'unassigned')..(sample.available and '' or ' [unavailable]'))
       end

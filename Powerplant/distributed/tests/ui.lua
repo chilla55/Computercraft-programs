@@ -164,4 +164,33 @@ check(coroutine.resume(tasks[1]),'input startup')
 local ok,wait=coroutine.resume(tasks[3]); check(ok and wait=='monitor_write','renderer did not yield')
 ok,wait=coroutine.resume(tasks[1],'monitor_touch','monitor_0',1,2)
 check(ok and wait=='event' and actions[1]=='emergency_stop','touch blocked by monitor drawing')
+local powerData={voltages={source={available=true,volts=7140.4}},sourceMeters={current={available=true,amps=11}}}
+check(math.abs(UI.sourcePower(powerData)-78544.4)<1e-6,'source power calculation wrong')
+powerData.sourceMeters.current.amps=-11
+check(math.abs(UI.sourcePower(powerData)-78544.4)<1e-6,'reversed current gauge changed power magnitude')
+powerData.sourceMeters.current.available=false
+check(UI.sourcePower(powerData)==nil,'unavailable current produced calculated power')
+powerData.sourceMeters.current.available=true; powerData.voltages.source.volts=0/0
+check(UI.sourcePower(powerData)==nil,'invalid voltage produced power')
+powerData.voltages.source.volts=0
+check(UI.sourcePower(powerData)==0,'zero voltage not shown as zero power')
+powerData.voltages.source.available=false
+check(UI.sourcePower(powerData)==nil,'missing source voltage used another voltage')
+w=80; h=30; lines={}; ink={}
+d.voltages.source={available=true,volts=7140.4}; d.sourceMeters.current={available=true,amps=11}
+local powerUI=UI.new(screen,c); powerUI.draw(d)
+local powerVisible=false
+for _,line in pairs(lines) do if line:find('78.54 kW',1,true) then powerVisible=true end end
+check(powerVisible,'calculated source power missing from diagram')
+local watts,status=UI.sourcePowerReading(d)
+check(math.abs(watts-78544.4)<1e-6 and status=='Calculated','calculated status wrong')
+d.sourceMeters.power={available=true,watts=78000}
+watts,status=UI.sourcePowerReading(d)
+check(watts==78000 and status=='Measured','power gauge not preferred')
+d.sourceMeters.power.available=false
+watts,status=UI.sourcePowerReading(d)
+check(status=='Calculated','failed power gauge did not fall back')
+d.sourceMeters.current.available=false
+watts,status=UI.sourcePowerReading(d)
+check(watts==nil and status=='Unavailable','missing sources did not show unavailable')
 print(('PASS: %d portrait monitor UI checks'):format(n))
