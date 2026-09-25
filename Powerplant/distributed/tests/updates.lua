@@ -55,7 +55,7 @@ R.send=function(role,kind,data)
   if kind=='update_activate' then activated=activated+1; assert(data.approved and data.approvalId) else transferred=transferred+1 end
   R.updateAcks[data.id]={ok=true}
 end
-http={get=function(url) return {readAll=function() return url:match('%.json$') and 'manifest' or body end,close=function() end} end}
+http={get=function(url) return {readAll=function() return url:find('approved-release.json',1,true) and 'manifest' or body end,close=function() end} end}
 textutils={unserializeJSON=function() return manifest end}
 api=Update.new(R)
 -- Initially neither worker has a staged release.
@@ -109,4 +109,26 @@ B.U.release='distributed-1.0.3'; B.rebootRequested=nil; B.state={latched=true}
 bounded=Update.new(B)
 check(not files['bounded/releases/distributed-1.0.1'] and files['bounded/releases/distributed-1.0.3'],'new boot did not prune superseded running version')
 check(files['bounded/app.lua']=='original fallback' and records['bounded/active-release.json'].previous=='bundled','fallback changed after upgrade')
+-- Manual checks wake the background task, even with automatic checks disabled.
+R.root='manual-install'; R.state={latched=false}; R.node={autoUpdate=false}; R.rebootRequested=nil
+R.U.release=manifest.version
+local downloads,lastUrl=0
+http.get=function(url) downloads=downloads+1; lastUrl=url; return {readAll=function() return 'manifest' end,close=function() end} end
+os.startTimer=function() return 1 end
+os.pullEvent=function() return coroutine.yield('event') end
+api=Update.new(R)
+local runner=coroutine.create(api.run)
+local ok,wait=coroutine.resume(runner)
+check(ok and wait=='event' and downloads==0,'disabled auto-check still fetched a manifest')
+check(api.requestCheck() and R.state.updateChecking,'manual check was not queued')
+check(not api.requestCheck(),'duplicate manual check queued')
+ok,wait=coroutine.resume(runner,'distributed_update_check')
+check(ok and wait=='event' and downloads==1 and not R.state.updateChecking,'manual check did not finish in background')
+check(lastUrl:find('?check=100',1,true),'manual check reused a stale manifest URL')
+check(R.state.updateMessage=='No newer update available.' and not R.rebootRequested,'checking implicitly applied an update')
+http.get=function() error('HTTP unavailable') end
+check(api.requestCheck(),'second manual check refused')
+ok,wait=coroutine.resume(runner,'distributed_update_check')
+check(ok and wait=='event' and not R.state.updateChecking and R.state.updateMessage:find('HTTP unavailable',1,true),'failed check stuck busy or lost error')
+check(not pcall(bounded.requestCheck),'worker allowed to check GitHub')
 print(('PASS: %d staged-update checks'):format(count))

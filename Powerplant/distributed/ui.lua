@@ -3,7 +3,7 @@ local M={}
 function M.new(screen,c,clock)
   clock=clock or os.clock
   local tab,offset,editing='Diagram',0,nil
-  local tabs={'Diagram','Variacs','Gauges','Settings','Incidents'}
+  local tabs={'Diagram','Variacs','Gauges','Settings','Incidents','Updates'}
   local hits={}
   local frame,lastRows={},{}
   local lastWidth,lastHeight
@@ -59,12 +59,17 @@ function M.new(screen,c,clock)
     else
       put(1,1,'TRANSFORMER '..string.upper(data.phase or '?'),c.cyan,nil,w-14)
       button(math.max(1,w-13),1,' EMERGENCY STOP',{kind='emergency'},c.red)
-      local x=1
-      for _,name in ipairs(tabs) do
-        button(x,2,' '..name..' ',{kind='tab',name=name},name==tab and c.blue or c.gray); x=x+#name+2
+      if w<56 then
+        button(1,2,'<',{kind='page',delta=-1}); put(3,2,tab,c.cyan,nil,w-4)
+        button(w,2,'>',{kind='page',delta=1})
+      else
+        local x=1
+        for _,name in ipairs(tabs) do
+          button(x,2,' '..name..' ',{kind='tab',name=name},name==tab and c.blue or c.gray); x=x+#name+2
+        end
       end
     end
-    local rows={}
+    local rows,actions={},{}
     local function row(text) rows[#rows+1]=text end
     if compact and tab=='Diagram' then
       row('Source '..fmt(data.sourceVoltage,'V'))
@@ -113,6 +118,22 @@ function M.new(screen,c,clock)
         local sample=data.sourceMeters[key]; if compact then row('Source '..key); row(fmt(sample.amps or sample.watts,key=='current' and ' A' or ' W')) else row('Source '..key..': '..fmt(sample.amps or sample.watts,key=='current' and ' A' or ' W')) end
         row(' '..tostring(sample.peripheral or 'unassigned')..(sample.available and '' or ' [unavailable]'))
       end
+    elseif tab=='Updates' then
+      local function version(v) return v and v:gsub('^distributed%-','') or '--' end
+      if data.updateCanApprove and not data.updateChecking and not data.updateApplying then
+        row(' Check now '); actions[#rows]={kind='update_check'}
+      else row(data.updateChecking and 'Checking...' or data.updateApplying and 'Applying...' or 'Check on master') end
+      row('Running: '..version(data.runningVersion))
+      row('Latest: '..version(data.availableUpdate))
+      row('Staged: '..version(data.updateReady))
+      row(data.autoUpdate and 'Auto: every 5 min' or 'Auto checks: off')
+      row(data.updateMessage or 'Press Check now to query GitHub.')
+      for _,role in ipairs({'regulation','protection'}) do
+        local peer=(data.updateWorkers or {})[role] or {}
+        row(role..': '..(peer.online and version(peer.version) or 'offline'))
+        if peer.ready then row(' Staged: '..version(peer.ready)) end
+      end
+      row('Apply requires maintenance and both workers ready.')
     elseif tab=='Incidents' then
       for i=#(data.events or {}),1,-1 do
         local e=data.events[i]; row((e.origin or '?')..': '..(e.resolvedBy and 'opening explained' or e.code or 'unknown'))
@@ -134,7 +155,8 @@ function M.new(screen,c,clock)
     for j=1,height do
       local index=offset+j
       if rows[index] then
-        put(1,j+top,rows[index])
+        if actions[index] then button(1,j+top,rows[index],actions[index],c.blue)
+        else put(1,j+top,rows[index]) end
         if tab=='Settings' then hits[#hits+1]={x=1,y=j+top,width=w,action={kind='edit',key=api.settingKeys[index]}} end
       end
     end
@@ -154,10 +176,10 @@ function M.new(screen,c,clock)
       statusLine(h-3)
       if data.updateReady then
         put(1,h-2,'Ready '..(data.updateReady:match('%d+%.%d+%.%d+') or data.updateReady),c.yellow)
-        if data.updateCanApprove and not data.updateApplying then
+        if data.updateCanApprove and not data.updateApplying and not data.updateChecking then
           button(1,h-1,'Apply',{kind='update_apply',version=data.updateReady},c.blue)
           button(math.max(7,w-4),h-1,'Later',{kind='update_later',version=data.updateReady})
-        else put(1,h-1,data.updateApplying and 'Applying...' or 'Await master',c.lightGray) end
+        else put(1,h-1,data.updateApplying and 'Applying...' or data.updateChecking and 'Checking...' or 'Await master',c.lightGray) end
       else
         put(1,h-2,'Tgt '..fmt(data.nominalTarget,'V'),c.cyan)
         button(1,h-1,' Quit ',{kind='stop'})
@@ -178,11 +200,11 @@ function M.new(screen,c,clock)
       put(1,h-1,'Update ready: '..data.updateReady,c.yellow)
       if not editing then
         put(1,h,string.rep(' ',w))
-        if data.updateCanApprove and not data.updateApplying then
+        if data.updateCanApprove and not data.updateApplying and not data.updateChecking then
           button(1,h,' Apply ',{kind='update_apply',version=data.updateReady},c.blue)
           button(10,h,' Later ',{kind='update_later',version=data.updateReady})
           put(19,h,data.updateDeferred and 'Postponed; files retained.' or 'Requires isolation + restart.',c.lightGray)
-        else put(1,h,data.updateApplying and 'Applying approved update...' or 'Staged only; waiting for UI master approval.',c.lightGray) end
+        else put(1,h,data.updateApplying and 'Applying approved update...' or data.updateChecking and 'Checking and staging update...' or 'Staged only; waiting for UI master approval.',c.lightGray) end
       end
     end
     end

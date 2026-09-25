@@ -83,6 +83,8 @@ function M.run(R)
     if a.kind=='emergency' or a.kind=='maintenance' or a.kind=='stop' then
       R.trip(a.kind=='emergency' and 'emergency_stop' or 'operator_stop','Operator requested '..a.kind)
       if a.kind=='stop' then error('STOP',0) end
+    elseif a.kind=='update_check' then
+      R.updater.requestCheck()
     elseif a.kind=='update_apply' then
       R.updater.approve(a.version)
     elseif a.kind=='update_later' then
@@ -127,6 +129,15 @@ function M.run(R)
           cache.fault,cache.tripPending=faultStatus()
           cache.updateReady=R.state.updateReady; cache.updateDeferred=R.state.updateDeferred
           cache.updateApplying=R.state.updateApplying; cache.updateCanApprove=R.role=='master'
+          cache.updateChecking=R.state.updateChecking; cache.updateMessage=R.state.updateMessage
+          cache.runningVersion=U.release; cache.availableUpdate=R.state.availableUpdate
+          cache.autoUpdate=R.node.autoUpdate~=false
+          cache.updateWorkers={}
+          for _,role in ipairs({'regulation','protection'}) do
+            local peer,version=R.updatePeer(role)
+            if role==R.role then peer,version=R.state,U.release end
+            cache.updateWorkers[role]={online=peer~=nil,version=version,ready=peer and peer.updateReady}
+          end
           screen.draw(cache)
           if output~='terminal' then
             local edit=screen.editing()

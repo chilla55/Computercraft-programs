@@ -48,7 +48,7 @@ function M.receiver(manifest,hash,writeFile)
   return api
 end
 function M.new(R)
-  local U=R.U; local pending,manifest,staging,approval
+  local U=R.U; local pending,manifest,staging,approval,checkRequested
   local savedPath=fs.combine(R.root,'staged-update.json')
   local function isolated()
     assert(R.state.latched and U.isolated(R.config.settings) and U.idle(R.config.settings),'Applying an update requires maintenance isolation')
@@ -158,7 +158,7 @@ function M.new(R)
   end
   function api.check()
     assert(R.role=='master','Only the UI master checks for updates')
-    local release=M.validate(textutils.unserializeJSON(get(repository..'main/Powerplant/distributed/approved-release.json')))
+    local release=M.validate(textutils.unserializeJSON(get(repository..'main/Powerplant/distributed/approved-release.json?check='..tostring(R.now()))))
     R.state.availableUpdate=release.version
     if not M.newer(release.version,U.release) then return end
     local reusable=manifest and manifest.version==release.version and pending and pending.complete()
@@ -195,7 +195,16 @@ function M.new(R)
     markReady()
     R.state.updateMessage=release.version..' staged on all computers; approval required.'
   end
+  function api.requestCheck()
+    assert(R.role=='master','Check for updates on the UI master')
+    if R.state.updateChecking or R.state.updateApplying or R.rebootRequested or approval then return false end
+    checkRequested=true; R.state.updateChecking=true
+    R.state.updateMessage='Checking GitHub for updates...'
+    os.queueEvent('distributed_update_check')
+    return true
+  end
   function api.approve(version)
+    assert(not R.state.updateChecking,'Wait for the current update check to finish')
     assert(not R.state.updateApplying,'Update activation already in progress')
     assert(R.role=='master','Only the UI master can accept an upgrade')
     assert(manifest and R.state.updateReady==version and manifest.version==version,'Displayed update is no longer ready')
@@ -205,6 +214,7 @@ function M.new(R)
     os.queueEvent('distributed_update_apply')
   end
   function api.defer(version)
+    assert(not R.state.updateChecking,'Wait for the current update check to finish')
     assert(not R.state.updateApplying,'Update activation already in progress')
     assert(R.role=='master' and manifest and manifest.version==version,'No matching staged update')
     approval=nil; R.state.updateDeferred=version; markReady()
@@ -234,14 +244,18 @@ function M.new(R)
         local ok,why=pcall(api.apply)
         if not ok then R.state.updateApplying=nil end
         if not ok then R.state.updateMessage='Not applied: '..tostring(why)..'. Press Apply to retry.' end
-      elseif R.node.autoUpdate~=false and R.now()>=nextCheck then
-        nextCheck=R.now()+300000
+      elseif checkRequested or (R.node.autoUpdate~=false and R.now()>=nextCheck) then
+        checkRequested=false; nextCheck=R.now()+300000
+        R.state.updateChecking=true; R.state.updateMessage='Checking GitHub for updates...'
+        os.queueEvent('distributed_ui')
         local ok,why=pcall(api.check)
-        if not ok then R.state.updateMessage=tostring(why)
+        R.state.updateChecking=nil; R.state.lastUpdateCheckAt=R.now()
+        if not ok then R.state.updateMessage='Update check failed: '..tostring(why)
         elseif not R.state.updateReady then R.state.updateMessage='No newer update available.' end
+        os.queueEvent('distributed_ui')
       end
       local timer=os.startTimer(1)
-      repeat local event,id=os.pullEvent() until event=='distributed_update_apply' or (event=='timer' and id==timer)
+      repeat local event,id=os.pullEvent() until event=='distributed_update_apply' or event=='distributed_update_check' or (event=='timer' and id==timer)
     end
   end
   return api

@@ -56,6 +56,21 @@ now=21+1.5+(#d.fault-(w-6))*.2; scrolling.draw(d)
 check(lines[h-3]:sub(1,6)=='TRIP: ' and lines[h-3]:sub(7)==d.fault:sub(-(w-6)),'fault tail not visible or TRIP label scrolled away')
 d.fault=nil; scrolling.draw(d)
 check(lines[h-3]:sub(1,6)~='TRIP: ','cleared fault stayed on screen')
+-- Updates page on the portrait monitor and the standard 51-column terminal.
+for _,width in ipairs({15,51}) do
+ w=width; h=29; local updates=UI.new(screen,c,function() return 0 end)
+ d.updateCanApprove=true; d.updateChecking=nil; d.updateApplying=nil; d.runningVersion='distributed-1.1.9'; d.autoUpdate=false
+ updates.draw(d)
+ updates.event('mouse_click',1,1,width<45 and 3 or 2); updates.draw(d) -- wrap left to Updates
+ local y=width<45 and 5 or 3
+ check(updates.event('mouse_click',1,2,y).kind=='update_check','Updates Check now missing')
+ check(lines[y+1]:find('1.1.9',1,true),'running version absent from Updates')
+ d.updateChecking=true; updates.draw(d)
+ check(updates.event('mouse_click',1,2,y)==nil,'busy check button still enabled')
+ d.updateChecking=nil; d.updateCanApprove=false; updates.draw(d)
+ check(updates.event('mouse_click',1,2,y)==nil,'worker screen allowed update check')
+end
+w=15; h=29
 -- The renderer may yield in a monitor write without blocking touch input.
 local tasks,actions={},{}
 local monitor=setmetatable({setTextScale=function(scale) check(scale==0.5,'monitor scale') end,
@@ -64,7 +79,7 @@ local env=setmetatable({term=screen,colors=c,peripheral={wrap=function() return 
  os={pullEvent=function() return coroutine.yield('event') end},
  sleep=function() coroutine.yield('sleep') end,
  parallel={waitForAny=function(...) for _,fn in ipairs({...}) do tasks[#tasks+1]=coroutine.create(fn) end end}}, {__index=_G})
-local R={role='master',node={monitor='monitor_0'},config={settings={}},U={},fresh=function() end,state={},events={},modules={ui=UI},
+local R={role='master',node={monitor='monitor_0'},config={settings={}},U={},fresh=function() end,updatePeer=function() end,state={},events={},modules={ui=UI},
  trip=function(code) actions[#actions+1]=code end}
 assert(loadfile('Powerplant/distributed/interface.lua','t',env))().run(R)
 check(coroutine.resume(tasks[1]),'input startup')
