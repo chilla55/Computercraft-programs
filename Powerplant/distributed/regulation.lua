@@ -55,19 +55,26 @@ function M.new(R)
   end
   local function request(group)
     R.state.phase='await_'..group
+    guard(group=='input') -- Verify full isolation before requesting input closure.
     local untilAt=R.now()+s.chargeTimeout*1000
     repeat
-      guard(group=='input')
+      if group=='input' then
+        -- Protection closes contacts sequentially. A partially closed input
+        -- group is expected here; shafts remain idle and outputs stay open.
+        assert(not R.state.latched,'Regulation tripped/stopped')
+        local p=R.fresh('protection')
+        assert(p and not p.latched and p.cycle==R.state.cycle,'Protection unavailable during input connection')
+        assert(U.device(s.plusBreaker).isClosed()==false and U.device(s.minusBreaker).isClosed()==false,'Output must stay isolated during input connection')
+        U.aligned(s); assert(U.idle(s),'Drives moved during input connection')
+      else guard(false) end
       R.publish('close',{cycle=R.state.cycle,group=group})
       sleep(.25)
-      assert(not R.state.latched and R.now()<untilAt,'Breaker permission timed out')
+      assert(not R.state.latched and R.now()<untilAt,'Breaker permission timed out: '..group)
       local p=R.fresh('protection')
-      if p and p.cycle==R.state.cycle and p.phase==(group=='input' and 'input_on' or 'connected') then return end
-      -- Once input has closed, waiting for its acknowledgement must not
-      -- interpret the intended close as an isolation violation.
-      if group=='input' then
-        local all=true; for _,name in ipairs(s.inputBreakers) do all=all and U.device(name).isClosed() end
-        if all and p and not p.latched then return end
+      if p and not p.latched and p.cycle==R.state.cycle and p.phase==(group=='input' and 'input_on' or 'connected') then
+        local names=group=='input' and s.inputBreakers or {s.plusBreaker,s.minusBreaker}
+        for _,name in ipairs(names) do assert(U.device(name).isClosed(),'Breaker not closed after permission: '..name) end
+        return
       end
     until false
   end

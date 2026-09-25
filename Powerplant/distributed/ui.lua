@@ -1,31 +1,52 @@
 -- Local advanced-computer UI. Hardware stays owned by transformer_controller.
 local M={}
-function M.new(screen,c)
+function M.new(screen,c,clock)
+  clock=clock or os.clock
   local tab,offset,editing='Diagram',0,nil
   local tabs={'Diagram','Variacs','Gauges','Settings','Incidents'}
   local hits={}
   local frame,lastRows={},{}
   local lastWidth,lastHeight
+  local scrolling,animated={},false
+  local frameTime=0
   local function fmt(v,unit) return type(v)=='number' and string.format('%.1f%s',v,unit or '') or '--' end
   local function value(v)
     if type(v)=='table' then return table.concat(v,',') end
     return tostring(v)
   end
-  local function put(x,y,text,fg,bg)
+  local function put(x,y,text,fg,bg,limit,fixed)
     local w,h=screen.getSize(); if y<1 or y>h then return end
+    local width=math.max(0,math.min(limit or w,w-x+1))
+    text=tostring(text)
+    local key=tab..':'..x..':'..y
+    if #text>width and width>0 and not fixed then
+      animated=true
+      local old=scrolling[key]
+      if not old or old.text~=text or old.width~=width then
+        old={text=text,width=width,since=frameTime}; scrolling[key]=old
+      end
+      local distance=#text-width
+      -- Pause at both ends; scroll slowly enough to read a narrow monitor.
+      local duration=distance*.2
+      local elapsed=math.max(0,frameTime-old.since)%(duration+3)
+      local start=math.min(distance,math.max(0,math.floor((elapsed-1.5)/.2)))
+      text=text:sub(start+1,start+width)
+    else
+      scrolling[key]=nil; text=text:sub(1,width)
+    end
     frame[y]=frame[y] or {}
-    frame[y][#frame[y]+1]={x=x,text=tostring(text):sub(1,math.max(0,w-x+1)),fg=fg or c.white,bg=bg or c.black}
+    frame[y][#frame[y]+1]={x=x,text=text,fg=fg or c.white,bg=bg or c.black}
   end
   local function button(x,y,label,action,bg)
-    put(x,y,label,c.white,bg or c.gray)
+    put(x,y,label,c.white,bg or c.gray,nil,true)
     hits[#hits+1]={x=x,y=y,width=#label,action=action}
   end
   local api={}
   function api.draw(data)
     local w,h=screen.getSize(); hits={}
-    frame={}
+    frame={}; animated=false; frameTime=clock()
     if w~=lastWidth or h~=lastHeight then
-      screen.setBackgroundColor(c.black); screen.clear(); lastRows={}
+      screen.setBackgroundColor(c.black); screen.clear(); lastRows={}; scrolling={}
       lastWidth,lastHeight=w,h
     end
     local compact=w<45
@@ -33,10 +54,10 @@ function M.new(screen,c)
       put(1,1,string.upper(data.phase or 'TRANSFORMER'),c.cyan)
       button(1,2,' E-STOP ',{kind='emergency'},c.red)
       button(1,3,'<',{kind='page',delta=-1})
-      put(3,3,tab:sub(1,w-4),c.cyan)
+      put(3,3,tab,c.cyan,nil,w-4)
       button(w,3,'>',{kind='page',delta=1})
     else
-      put(1,1,'TRANSFORMER '..string.upper(data.phase or '?'),c.cyan)
+      put(1,1,'TRANSFORMER '..string.upper(data.phase or '?'),c.cyan,nil,w-14)
       button(math.max(1,w-13),1,' EMERGENCY STOP',{kind='emergency'},c.red)
       local x=1
       for _,name in ipairs(tabs) do
@@ -79,7 +100,7 @@ function M.new(screen,c)
       for i,s in ipairs(data.stages) do
         row(compact and ('Stage '..i) or ('Stage '..i..' / '..s.gear))
         for _,m in ipairs(s.members) do
-          row(' '..(compact and m.name:sub(-w+1) or m.name))
+          row(' '..m.name)
           row((compact and '' or '   ')..fmt(m.position and m.position*100,'%')..(compact and ' ' or '   ')..fmt(m.temperature,'C'))
         end
       end
@@ -118,13 +139,19 @@ function M.new(screen,c)
       end
     end
     local status=data.emergencyStopped and 'EMERGENCY STOP LATCHED' or data.maintenance.active and
-      (data.maintenance.verified and data.maintenance.drivesIdle and 'MAINTENANCE: contacts open, drives idle' or 'MAINTENANCE: isolation not yet verified') or data.fault or data.message
+      (data.maintenance.verified and data.maintenance.drivesIdle and 'MAINTENANCE: contacts open, drives idle' or 'MAINTENANCE: isolation not yet verified') or data.message
+    local function statusLine(y)
+      if data.fault or data.tripPending then
+        put(1,y,'TRIP: ',c.red,nil,6,true)
+        put(7,y,data.tripPending and 'Checking reason...' or data.fault,c.red)
+      else put(1,y,status or '',data.emergencyStopped and c.red or c.yellow) end
+    end
     if compact then
       button(1,h-6,' Up ',{kind='scroll',delta=-1})
       button(math.max(6,w-5),h-6,' Down ',{kind='scroll',delta=1})
       button(1,h-5,' Maintenance ',{kind='maintenance'})
       button(1,h-4,' Resume/reset ',{kind='resume'})
-      put(1,h-3,status or '',c.yellow)
+      statusLine(h-3)
       if data.updateReady then
         put(1,h-2,'Ready '..(data.updateReady:match('%d+%.%d+%.%d+') or data.updateReady),c.yellow)
         if data.updateCanApprove and not data.updateApplying then
@@ -137,7 +164,7 @@ function M.new(screen,c)
       end
       put(1,h,editing and editing.text:sub(-w) or (data.updateDeferred and 'Update postponed' or 'Tap; type on PC'),c.lightGray)
     else
-    put(1,h-4,status or '',data.emergencyStopped and c.red or c.yellow)
+    statusLine(h-4)
     put(1,h-3,data.maintenance.reason or data.message or '',c.lightGray)
     button(1,h-2,' Maintenance ',{kind='maintenance'})
     button(15,h-2,' Resume/reset ',{kind='resume'})
@@ -205,6 +232,7 @@ function M.new(screen,c)
       elseif a==keys.up then offset=math.max(0,offset-1) elseif a==keys.down then offset=offset+1 end
     end
   end
+  function api.animating() return animated end
   function api.editing() return editing end
   return api
 end

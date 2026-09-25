@@ -25,7 +25,7 @@ wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powe
 install-transformer.lua
 ```
 
-To select an exact release, use `install-transformer.lua transformer distributed-1.1.7` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
+To select an exact release, use `install-transformer.lua transformer distributed-1.1.8` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
 
 The default installation folder is `transformer/`, which holds the original fallback and stable launcher and verifies every file against the GitHub release manifest. It does not replace an existing installation or alter startup scripts. HTTP must be enabled and GitHub accessible. Alternatively, copy all top-level `.lua` files from this directory into `transformer/` using a disk.
 
@@ -60,7 +60,7 @@ Use **Resume/reset** on the UI or protection computer once temperatures are fres
 
 1. Verifies input/output isolation and waits for any old sequence to finish.
 2. Checks directions and homes misaligned parallel banks to minimum with no input supply.
-3. Verifies every member's alignment and idle drives, then requests input connection.
+3. Verifies every member's alignment and idle drives, then requests input connection. Protection closes the input contacts sequentially; regulation keeps shafts idle and outputs open until the entire input group is confirmed closed. Partial connection during this bounded wait is not treated as a homing fault.
 4. Tunes the output while output breakers remain open.
 5. Requests output connection; protection independently checks readiness and measured output voltage.
 6. Regulates using bounded target ramps while protection continues independently.
@@ -75,7 +75,7 @@ This first distributed release uses local single-mode regulation. The older plan
 
 ## UI and configuration
 
-The master wizard selects the connected UI monitor, or `-` for its computer screen. Use an **advanced monitor one block wide and two blocks high**, attached to the same wired network or directly to the UI computer. The program selects 0.5 text scale and a portrait layout automatically. Touch the left/right arrows to change pages and Up/Down to scroll. Emergency stop remains at the top; maintenance and reset remain at the bottom. Touch a setting, then type its value on the computer keyboard (Enter saves; Escape cancels). The full field name/value appears on the computer during editing. If the monitor disconnects, the UI falls back to the computer screen and returns when it reconnects. Worker computers retain their local status screens; configuration edits belong to the master. The screen uses cached readings and changed-row rendering. Tabs show the diagram, member positions/temperatures, gauges, supported settings and incident history. The source spark gap is labelled as **7,500 V generator protection**, not a software trip setting.
+The master wizard selects the connected UI monitor, or `-` for its computer screen. Use an **advanced monitor one block wide and two blocks high**, attached to the same wired network or directly to the UI computer. The program selects 0.5 text scale and a portrait layout automatically. Touch the left/right arrows to change pages and Up/Down to scroll. Emergency stop remains at the top; maintenance and reset remain at the bottom. Touch a setting, then type its value on the computer keyboard (Enter saves; Escape cancels). The full field name/value appears on the computer during editing. If the monitor disconnects, the UI falls back to the computer screen and returns when it reconnects. Worker computers retain their local status screens; configuration edits belong to the master. The screen uses cached readings and changed-row rendering. Long status messages, incident reasons and peripheral names scroll horizontally with a pause at each end; buttons remain fixed. Faults show a red `TRIP:` label and scrolling reason instead of maintenance. An unexplained opening initially shows `TRIP: Checking reason...` while controller reports arrive. After two seconds without a cause it shows `TRIP: Unknown breaker opening`; later reports remain available in incident history. Operator-requested maintenance retains its separate maintenance display. Tabs show the diagram, member positions/temperatures, gauges, supported settings and incident history. The source spark gap is labelled as **7,500 V generator protection**, not a software trip setting.
 
 - **Emergency stop / E:** trip directly from this computer, then report it. The button works while editing; the shortcut works outside text editing.
 - **Maintenance:** trip/latch all breakers open.

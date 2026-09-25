@@ -16,11 +16,11 @@ function M.new(config,node,modules,root)
     R.state.runRequested=saved.runRequested==true or (saved.runRequested==nil and saved.latched==false)
     R.state.realignRequested=saved.realignRequested==true
     R.bootResume=R.state.runRequested
-    if not R.state.runRequested then R.state.phase=saved.phase or 'stopped' end
+    if not R.state.runRequested then R.state.phase=saved.phase or 'stopped'; R.state.fault=saved.fault end
     for _,event in ipairs(saved.events) do R.events[#R.events+1]=event; R.eventIndex[event.id]=true end
   end
   assert(U.finite(R.state.target) and R.state.target>0 and R.state.target/(config.settings.stepUp*.99999^3)<config.settings.maxInputVolts,'Saved target outside current configuration limits')
-  function R.persist() U.write('distributed-state.json',{target=R.state.target,events=R.events,latched=R.state.latched,runRequested=R.state.runRequested,phase=R.state.phase,realignRequested=R.state.realignRequested}) end
+  function R.persist() U.write('distributed-state.json',{target=R.state.target,events=R.events,latched=R.state.latched,runRequested=R.state.runRequested,phase=R.state.phase,realignRequested=R.state.realignRequested,fault=R.state.fault}) end
   function R.send(role,kind,data)
     R.sequence=R.sequence+1
     pcall(rednet.send,config.ids[role],{schema=1,revision=config.revision,release=U.release,role=R.role,
@@ -47,7 +47,7 @@ function M.new(config,node,modules,root)
         for _,cause in ipairs(R.events) do
           if cause.code~='unknown_opening' and cause.cycle==observed.cycle and cause.commandedAt
             and cause.commandedAt<=observed.observedAt and observed.observedAt-cause.commandedAt<=2000 then
-            observed.resolvedBy=cause.id; observed.resolvedCause=cause.origin..': '..cause.code; break
+            observed.resolvedBy=cause.id; observed.resolvedCause=cause.origin..': '..cause.reason; break
           end
         end
       end
@@ -60,11 +60,17 @@ function M.new(config,node,modules,root)
     local recover=code=='bank_misaligned' and (R.state.runRequested or R.state.realignRequested) and R.state.phase~='homing'
     R.state.realignRequested=recover or false
     R.bootResume=false; R.state.runRequested=false
-    R.state.latched=true; R.state.phase='tripped'; R.state.generation=R.state.generation+1; R.commands={}
+    R.state.latched=true; R.state.phase=code=='operator_stop' and 'maintenance' or 'tripped'; R.state.generation=R.state.generation+1; R.commands={}
+    R.state.message=reason
+    R.state.fault=code~='operator_stop' and reason or nil
+    R.state.tripPending=code=='unknown_opening' or nil
+    R.tripPendingUntil=R.state.tripPending and requestedAt+2000 or nil
+    R.faultAt=requestedAt
     local opened,why=U.openAll(config.settings) -- No network or disk prerequisite.
     if repeated then R.state.message=not opened and why or R.state.message; return end
     if not remote then R.lastLocalFault=tostring(code)..':'..tostring(reason) end
     local event=remote and U.copy(remote) or {id=R.token(),origin=R.role,computer=os.getComputerID(),at=R.now(),code=code,reason=reason,detail=detail,cycle=R.state.cycle}
+    R.state.tripEventId=event.id
     R.state.isolationVerified=opened
     if not remote then
       event.openVerified=opened; if not opened then event.openError=why end
@@ -72,10 +78,22 @@ function M.new(config,node,modules,root)
     end
     if R.record(event) then R.publish('trip',event); R.persist() end
   end
-  function R.clearFaults() R.state.realignRequested=false; R.bootResume=false; R.state.runRequested=true; R.lastLocalFault=nil; R.state.latched=false; R.state.generation=R.state.generation+1 end
+  function R.clearFaults() R.state.tripPending=nil; R.state.tripEventId=nil; R.state.fault=nil; R.state.message=nil; R.state.realignRequested=false; R.bootResume=false; R.state.runRequested=true; R.lastLocalFault=nil; R.state.latched=false; R.state.generation=R.state.generation+1 end
+  function R.refreshTripReason()
+    if not R.state.tripPending then return end
+    for _,event in ipairs(R.events) do
+      if event.id==R.state.tripEventId and event.resolvedBy then
+        R.state.tripPending=nil; R.state.fault=event.resolvedCause; R.persist(); return
+      end
+    end
+    if R.now()>=(R.tripPendingUntil or 0) then
+      R.state.tripPending=nil; R.state.fault='Unknown breaker opening (no controller reported a trip)'; R.persist()
+    end
+  end
   function R.heartbeat()
     while true do
       local ok=pcall(function()
+        R.refreshTripReason()
         if not rednet.isOpen(node.modem) then assert(U.device(node.modem).isWireless()==false,'Use the local wired modem'); rednet.open(node.modem) end
         R.publish('hello',{})
         if R.role=='master' then R.publish('config_offer',{config=config}) end

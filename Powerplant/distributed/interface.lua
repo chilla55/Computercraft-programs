@@ -22,6 +22,24 @@ function M.run(R)
   local cache={phase=R.role,config=s,maintenance={},stages={},inputBreakers={},breakers={},voltages={},sourceMeters={},events=R.events}
   for _,k in ipairs({'input','output','source','preStepUp'}) do cache.voltages[k]={} end
   cache.sourceMeters.current={}; cache.sourceMeters.power={}
+  local function faultStatus()
+    local protection=R.role=='protection' and R.state or R.fresh('protection')
+    local regulation=R.role=='regulation' and R.state or R.fresh('regulation')
+    local pending
+    local peers={protection=protection,regulation=regulation}
+    for _,role in ipairs({'protection','regulation'}) do
+      local peer=peers[role]
+      if peer and peer.latched and peer.fault then
+        if not peer.tripPending then return peer.fault,false end
+        pending=peer.fault
+      end
+    end
+    if pending then return pending,true end
+    if R.state.latched and R.state.fault and
+      (not protection or not regulation or (R.faultAt and R.now()-R.faultAt<2000)) then
+      return R.state.fault,R.state.tripPending
+    end
+  end
   local function snapshot()
     local data={phase=R.role,config={},maintenance={},stages={},inputBreakers={},breakers={},voltages={},sourceMeters={},events=R.events,
       entryRatio=s.entryRatio,stepUp=s.stepUp,sparkGapVolts=7500}
@@ -32,6 +50,8 @@ function M.run(R)
     data.nominalTarget=protection and protection.target or s.target
     data.target=regulation and regulation.activeTarget or data.nominalTarget; data.config.target=data.nominalTarget
     data.maintenance.active=protection and protection.latched and regulation and regulation.latched or false
+    data.fault=(protection and protection.latched and protection.fault) or (regulation and regulation.latched and regulation.fault)
+    data.maintenance.reason=data.fault
     local ok,isolated=pcall(U.isolated,s); data.maintenance.verified=ok and isolated
     local good,idle=pcall(U.idle,s); data.maintenance.drivesIdle=good and idle
     for i,key in ipairs({'input','output','source','preStepUp'}) do
@@ -99,11 +119,12 @@ function M.run(R)
   local function render()
     local lastEdit
     while true do
-      if dirty then
+      if dirty or (screen and screen.animating()) then
         dirty=false
         local ok,why=pcall(function()
           selectOutput()
           cache.message=R.state.message or R.state.updateMessage or ''; cache.events=R.events
+          cache.fault,cache.tripPending=faultStatus()
           cache.updateReady=R.state.updateReady; cache.updateDeferred=R.state.updateDeferred
           cache.updateApplying=R.state.updateApplying; cache.updateCanApprove=R.role=='master'
           screen.draw(cache)

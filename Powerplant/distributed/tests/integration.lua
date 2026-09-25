@@ -10,8 +10,13 @@ local settings={target=2640,stepUp=2.5,entryRatio=5,travelDegrees=315,maxInputVo
   inputGauge='vin',outputGauge='vout',sourceGauge='',preStepUpGauge='',sourceCurrentGauge='',sourcePowerGauge='',sourceCurrentTripAmps=0,
   variacsA={'a1','a2'},variacsB={'b1'},variacsC={'c1'},gearA='ga',gearB='gb',gearC='gc',pollSeconds=.1,settleSeconds=.2}
 local cfg={schema=1,revision=1,ids={master=1,regulation=2,protection=3},settings=settings}
-local function world(restore,thermalFault)
+local function world(restore,thermalFault,options)
+  options=options or {}
+  local cfg=U.copy(cfg); local settings=cfg.settings
+  if options.multiInput then settings.inputBreakers={'input','input2'} end
   local W={time=0,nodes={},contacts={input=false,plus=false,minus=false},positions={a1=.8,a2=.5,b1=.9,c1=.98},temperature={},motion={},moves={},closes={},drop={}}
+  if options.multiInput then W.contacts.input2=false end
+  local function powered() for _,name in ipairs(settings.inputBreakers) do if not W.contacts[name] then return false end end; return true end
   local function serialize(v)
     if type(v)=='string' then return string.format('%q',v) end
     if type(v)~='table' then return tostring(v) end
@@ -60,7 +65,7 @@ local function world(restore,thermalFault)
     for name in pairs(W.contacts) do
       devices[name]={isClosed=function() native(); return W.contacts[name] end,
         open=function() native(); W.contacts[name]=false end,
-        close=function() native(); W.closes[#W.closes+1]={role=N.role,name=name}; check(N.role=='protection','non-protection closed a breaker'); W.contacts[name]=true end,
+        close=function() native(); if options.closeDelay then env.sleep(options.closeDelay) end; W.closes[#W.closes+1]={role=N.role,name=name}; check(N.role=='protection','non-protection closed a breaker'); if options.failClose~=name then W.contacts[name]=true end end,
         getStatus=function() native(); return {closed=W.contacts[name],canClose=true,currentValid=true,current=1,tripEnabled=true,tripCurrent=50} end}
     end
     for name in pairs(W.positions) do devices[name]={
@@ -74,8 +79,8 @@ local function world(restore,thermalFault)
           if name~=W.jammed then W.motion[name]={from=W.positions[name],to=math.max(0,math.min(1,W.positions[name]+degrees*direction/315)),start=W.time,finish=W.time+.15} end
         end
       end} end
-    devices.vin={voltage=function() native(); return W.contacts.input and 1500 or 0 end}
-    devices.vout={voltage=function() native(); local value=W.contacts.input and 3750 or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; return value end}
+    devices.vin={voltage=function() native(); return powered() and 1500 or 0 end}
+    devices.vout={voltage=function() native(); local value=powered() and 3750 or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; return value end}
     env.peripheral={wrap=function(name) return devices[name] end}; env.print=function() end
     local function mod(name) return assert(loadfile(base..name..'.lua','t',env))() end
     local modules={common=mod('common'),thermal=mod('thermal_protection'),planner=mod('planner'),hash=mod('sha256'),updater=mod('updater')}
@@ -143,6 +148,9 @@ check(W.untilTrue(function() return not W.contacts.input and not W.contacts.minu
 W.untilTrue(function() return false end,.2)
 found=false; for _,e in ipairs(W.nodes[3].R.events) do if e.code=='unknown_opening' then found=true end end
 check(found,'unknown opening reason missing')
+check(W.nodes[3].R.state.tripPending==true,'unexplained opening not marked awaiting cause')
+W.untilTrue(function() return false end,2.2)
+check(not W.nodes[3].R.state.tripPending and W.nodes[3].R.state.fault:find('Unknown breaker opening',1,true),'unexplained opening remained pending indefinitely')
 W.untilTrue(function() return false end,1); W.command('start')
 check(W.untilTrue(function() return W.nodes[2].R.state.phase=='live' end,150),'second restart failed')
 W.dropHeartbeat=true -- hello packets alone must not renew regulation readiness.
@@ -154,6 +162,9 @@ local function event(id) for _,e in ipairs(ledger.events) do if e.id==id then re
 check(not event('observation').resolvedBy,'later trip falsely explained an earlier opening')
 ledger.record({id='earlier',origin='master',code='emergency_stop',reason='Operator stop',cycle='correlation',commandedAt=400})
 check(event('observation').resolvedBy=='earlier','delayed earlier command did not explain opening')
+ledger.state.tripPending=true; ledger.state.tripEventId='observation'; ledger.tripPendingUntil=ledger.now()+2000
+ledger.refreshTripReason()
+check(not ledger.state.tripPending and ledger.state.fault=='master: Operator stop','delayed cause did not replace pending trip reason')
 check(event('later') and event('earlier') and event('observation'),'multiple reasons lost during merge')
 -- Boot from a persisted running state without a UI start command.
 local previouslyRunning={regulation={events={},latched=false,runRequested=true},protection={events={},latched=false,runRequested=true}}
@@ -177,4 +188,15 @@ local blocked=world(previouslyRunning,true)
 blocked.untilTrue(function() return false end,3)
 check(#blocked.closes==0 and not blocked.nodes[3].R.state.runRequested,'automatic startup cleared thermal fault')
 check(W.nodes[3].R.state.runRequested==false,'trip did not clear restart intent')
+local multiple=world(nil,nil,{multiInput=true,closeDelay=.4})
+multiple.untilTrue(function() return multiple.nodes[3].R.fresh('regulation')~=nil end,3)
+multiple.command('start')
+local multiLive=multiple.untilTrue(function() return multiple.nodes[2].R.state.phase=='live' end,150)
+if not multiLive then for _,node in ipairs(multiple.nodes) do for _,event in ipairs(node.R.events) do print(node.role,event.code,event.reason) end end end
+check(multiLive and multiple.contacts.input2,'sequential input contacts interrupted startup')
+local failed=world(nil,nil,{multiInput=true,closeDelay=.4,failClose='input2'})
+failed.untilTrue(function() return failed.nodes[3].R.fresh('regulation')~=nil end,3)
+failed.command('start')
+check(failed.untilTrue(function() return failed.nodes[3].R.state.phase=='tripped' and not failed.contacts.input end,150),'failed second input did not trip/open first input')
+check(not failed.contacts.plus and not failed.contacts.minus,'output closed despite failed input connection')
 print(('PASS: %d distributed integration checks'):format(checks))

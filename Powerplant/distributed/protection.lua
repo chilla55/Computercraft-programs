@@ -101,6 +101,7 @@ function M.new(R)
       assert(math.abs(output-p.activeTarget)<=s.fallbackVolts,'Output not tuned')
       names={s.minusBreaker,s.plusBreaker}
     else error('Unknown breaker group') end
+    R.state.phase='closing_'..group
     for _,name in ipairs(names) do
       veto(); banksReady()
       local device=U.device(name); local status=device.getStatus()

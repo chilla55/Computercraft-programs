@@ -4,10 +4,16 @@ local n=0; local function check(v,m) assert(v,m); n=n+1 end
 local c={white=1,black=2,gray=3,cyan=4,red=5,blue=6,yellow=7,lightGray=8}
 local row,col,w,h=1,1,15,29
 local writes=0
+local lines,ink,fg={},{},c.white
 local screen={getSize=function() return w,h end,clear=function() end,
  setCursorPos=function(x,y) assert(x>=1 and x<=w and y>=1 and y<=h); col,row=x,y end,
- setTextColor=function() end,setBackgroundColor=function() end,
- write=function(s) assert(#s<=w-col+1,'screen overflow'); writes=writes+1 end}
+ setTextColor=function(color) fg=color end,setBackgroundColor=function() end,
+ write=function(s)
+ assert(#s<=w-col+1,'screen overflow'); writes=writes+1
+ local old=lines[row] or string.rep(' ',w)
+ lines[row]=old:sub(1,col-1)..s..old:sub(col+#s)
+ ink[row]=ink[row] or {}; for x=col,col+#s-1 do ink[row][x]=fg end
+end}
 local d={phase='master / live',inputBreakers={},breakers={},stages={},voltages={},sourceMeters={},
  maintenance={},config={entryRatio=5,target=2640},nominalTarget=2640}
 for _,k in ipairs({'source','input','preStepUp','output'}) do d.voltages[k]={available=false} end
@@ -29,6 +35,27 @@ for _,height in ipairs({19,29,40}) do
  d.updateApplying=nil; d.updateReady=nil; ui.draw(d)
  local before=writes; ui.draw(d); check(writes==before,'unchanged frame repainted')
 end
+-- Overflow advances with elapsed time while button hitboxes stay fixed.
+h=29; local now=0; local scrolling=UI.new(screen,c,function() return now end)
+d.maintenance={active=true,verified=true,drivesIdle=true}; d.phase='maintenance'
+scrolling.draw(d); local initial=lines[h-3]; local controls=lines[h-5]
+check(scrolling.animating(),'long status did not request animation')
+now=2.5; scrolling.draw(d)
+check(lines[h-3]~=initial,'maintenance text did not scroll')
+check(lines[h-5]==controls and scrolling.event('mouse_click',1,1,2).kind=='emergency','scrolling changed controls')
+local maintenance='MAINTENANCE: contacts open, drives idle'
+now=1.5+(#maintenance-w)*.2; scrolling.draw(d)
+check(lines[h-3]==maintenance:sub(-w),'maintenance tail never visible')
+d.fault='Input breaker input_2 failed to close'; d.tripPending=true
+now=20; scrolling.draw(d)
+check(lines[h-3]:sub(1,6)=='TRIP: ' and ink[h-3][1]==c.red and ink[h-3][7]==c.red,'trip did not replace maintenance in red')
+check(lines[h-3]:sub(7)=='Checking ','pending trip reason missing')
+d.tripPending=false; now=21; scrolling.draw(d)
+check(lines[h-3]:sub(7)=='Input bre','new fault did not reset scrolling')
+now=21+1.5+(#d.fault-(w-6))*.2; scrolling.draw(d)
+check(lines[h-3]:sub(1,6)=='TRIP: ' and lines[h-3]:sub(7)==d.fault:sub(-(w-6)),'fault tail not visible or TRIP label scrolled away')
+d.fault=nil; scrolling.draw(d)
+check(lines[h-3]:sub(1,6)~='TRIP: ','cleared fault stayed on screen')
 -- The renderer may yield in a monitor write without blocking touch input.
 local tasks,actions={},{}
 local monitor=setmetatable({setTextScale=function(scale) check(scale==0.5,'monitor scale') end,
@@ -37,7 +64,7 @@ local env=setmetatable({term=screen,colors=c,peripheral={wrap=function() return 
  os={pullEvent=function() return coroutine.yield('event') end},
  sleep=function() coroutine.yield('sleep') end,
  parallel={waitForAny=function(...) for _,fn in ipairs({...}) do tasks[#tasks+1]=coroutine.create(fn) end end}}, {__index=_G})
-local R={role='master',node={monitor='monitor_0'},config={settings={}},U={},state={},events={},modules={ui=UI},
+local R={role='master',node={monitor='monitor_0'},config={settings={}},U={},fresh=function() end,state={},events={},modules={ui=UI},
  trip=function(code) actions[#actions+1]=code end}
 assert(loadfile('Powerplant/distributed/interface.lua','t',env))().run(R)
 check(coroutine.resume(tasks[1]),'input startup')

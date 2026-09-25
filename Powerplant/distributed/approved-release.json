@@ -5,7 +5,7 @@
       "size": 11788
     },
     "common.lua": {
-      "sha256": "e6eae218438a4a7b332d7c10ff9b9d4112721dd60badd5b709bd8dafbd37219b",
+      "sha256": "b521806d1b85e6f0d076bd7a922c14be9423a3fc27d73b8e5fd86077e1cb2e0d",
       "size": 14699
     },
     "discovery.lua": {
@@ -13,24 +13,24 @@
       "size": 1473
     },
     "interface.lua": {
-      "sha256": "af0fd1048b5ff5dea4677c785c4c962321eb934816555735af05a5ad949c4b16",
-      "size": 7381
+      "sha256": "6fdd4d7742ee54dc1397b198d72977dabc38db51b36b5dc4dac0c8b8bf0ab310",
+      "size": 8395
     },
     "planner.lua": {
       "sha256": "8bb220d860939266819126ed58466de0957cea59c6f8389bda5830c89151e26c",
       "size": 1708
     },
     "protection.lua": {
-      "sha256": "8bc77f733b69da98aa4bdf3780eb6957151e8e908494592b4cc4865874de8d74",
-      "size": 10390
+      "sha256": "7d15ec79e009cf370213ce52d123b0e2153bba62e3e25ff1de3acf34d2b42ea8",
+      "size": 10426
     },
     "regulation.lua": {
-      "sha256": "645b17df8b4b8494d26cf4a108e017f074755f0d637d2fa2fb6ae5991856e6e3",
-      "size": 6621
+      "sha256": "cd3e7ff75cb716fa6fb225955653547cd394861533006ee6c0f76fa398e7527a",
+      "size": 7253
     },
     "runtime.lua": {
-      "sha256": "98183fea16814b2d427a19d3f32c1a17c268690222bacb782fdd3238843960d2",
-      "size": 11141
+      "sha256": "21ab09b972f465a942f2161af5dc42a106fd76e80d25aa380e950209f9bc5624",
+      "size": 12090
     },
     "sha256.lua": {
       "sha256": "d85c2a76d06b2ee814e26780347245f5a1780fe3bd7569663692e6e7433149e2",
@@ -45,15 +45,15 @@
       "size": 2631
     },
     "ui.lua": {
-      "sha256": "7670db1a6296b22fe2546c13cf13f1c2833a9bfdd990231f282a2e80f48584c5",
-      "size": 11435
+      "sha256": "22439f661398f2df1eed0c43f68b15d5fe2933c757a4ace5842af57dd56c5d37",
+      "size": 12531
     },
     "updater.lua": {
       "sha256": "bde29be11f4ed2ff7c2ee720ab4200cc05af13a88f7729e76f76d6ce055b6234",
       "size": 13751
     }
   },
-  "ref": "distributed-1.1.7",
+  "ref": "distributed-1.1.8",
   "schema": 1,
-  "version": "distributed-1.1.7"
+  "version": "distributed-1.1.8"
 }
