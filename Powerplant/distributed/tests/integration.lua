@@ -11,7 +11,7 @@ local settings={target=2640,stepUp=2.5,entryRatio=5,travelDegrees=315,maxInputVo
   variacsA={'a1','a2'},variacsB={'b1'},variacsC={'c1'},gearA='ga',gearB='gb',gearC='gc',pollSeconds=.1,settleSeconds=.2}
 local cfg={schema=1,revision=1,ids={master=1,regulation=2,protection=3},settings=settings}
 local function world(restore,thermalFault)
-  local W={time=0,nodes={},contacts={input=false,plus=false,minus=false},positions={a1=.8,a2=.5,b1=.9,c1=.98},temperature={},moves={},closes={},drop={}}
+  local W={time=0,nodes={},contacts={input=false,plus=false,minus=false},positions={a1=.8,a2=.5,b1=.9,c1=.98},temperature={},motion={},moves={},closes={},drop={}}
   local function serialize(v)
     if type(v)=='string' then return string.format('%q',v) end
     if type(v)~='table' then return tostring(v) end
@@ -64,12 +64,15 @@ local function world(restore,thermalFault)
         getStatus=function() native(); return {closed=W.contacts[name],canClose=true,currentValid=true,current=1,tripEnabled=true,tripCurrent=50} end}
     end
     for name in pairs(W.positions) do devices[name]={
-      getStatus=function() native(); return {position=W.positions[name],ratio=.01+.99*W.positions[name]} end,
+      getStatus=function() native(); return {position=W.positions[name],ratio=.01+.99*W.positions[name],shaftSpeed=W.motion[name] and 32 or 0} end,
       getThermalStatus=function() native(); return {available=true,unit='C',temperature=W.temperature[name] or 100} end} end
     for i,key in ipairs({'A','B','C'}) do devices[settings['gear'..key]]={isRunning=function() native(); return false end,
       rotate=function(degrees,direction)
         native(); W.moves[#W.moves+1]={degrees=degrees,isolated=not W.contacts.input and not W.contacts.plus and not W.contacts.minus}
-        for _,name in ipairs(settings['variacs'..key]) do W.positions[name]=math.max(0,math.min(1,W.positions[name]+degrees*direction/315)) end
+        for name in pairs(W.motion) do error('New movement before shaft stopped: '..name) end
+        for _,name in ipairs(settings['variacs'..key]) do
+          if name~=W.jammed then W.motion[name]={from=W.positions[name],to=math.max(0,math.min(1,W.positions[name]+degrees*direction/315)),start=W.time,finish=W.time+.15} end
+        end
       end} end
     devices.vin={voltage=function() native(); return W.contacts.input and 1500 or 0 end}
     devices.vout={voltage=function() native(); local value=W.contacts.input and 3750 or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; return value end}
@@ -83,6 +86,10 @@ local function world(restore,thermalFault)
   end
   function W.step()
     W.time=W.time+.001
+    for name,motion in pairs(W.motion) do
+      if W.time>=motion.finish then W.positions[name]=motion.to; W.motion[name]=nil
+      else W.positions[name]=motion.from+(motion.to-motion.from)*(W.time-motion.start)/(motion.finish-motion.start) end
+    end
     for _,N in ipairs(W.nodes) do
       if not N.started then N.started=true; local ok,e=coroutine.resume(N.co); assert(ok,e); N.filter=e end
       for id,deadline in pairs(N.timers) do if deadline<=W.time then N.timers[id]=nil; N.queue[#N.queue+1]={'timer',id} end end
@@ -155,6 +162,14 @@ check(resumed.untilTrue(function() return resumed.nodes[2].R.state.phase=='live'
 check(resumed.contacts.input and resumed.contacts.plus and resumed.contacts.minus,'automatic startup did not connect')
 resumed.positions.a2=resumed.positions.a1+0.000001
 check(resumed.untilTrue(function() return not resumed.contacts.input and not resumed.contacts.plus and not resumed.contacts.minus end,2),'small live bank spread did not trip')
+check(resumed.untilTrue(function() return resumed.nodes[2].R.state.phase=='live' and resumed.contacts.plus end,150),'misaligned bank did not automatically realign/reenter service')
+check(resumed.positions.a1==resumed.positions.a2,'reconnected misaligned bank')
+for _,move in ipairs(resumed.moves) do if move.degrees==318 then check(move.isolated,'automatic recovery homed while energized') end end
+resumed.jammed='a2'; resumed.positions.a2=resumed.positions.a1+0.001
+check(resumed.untilTrue(function() return resumed.nodes[2].R.state.phase=='tripped' and not resumed.nodes[2].R.state.realignRequested end,150),'jammed recovery did not latch a fault')
+local movesAfterJam=#resumed.moves
+resumed.untilTrue(function() return false end,3)
+check(not resumed.contacts.input and not resumed.contacts.plus and not resumed.contacts.minus and #resumed.moves==movesAfterJam,'jammed recovery retried or reconnected')
 local stopped=world({regulation={events={},latched=true,runRequested=false},protection={events={},latched=true,runRequested=false}})
 stopped.untilTrue(function() return false end,3)
 check(not stopped.contacts.input and #stopped.closes==0,'maintenance reboot reconnected')

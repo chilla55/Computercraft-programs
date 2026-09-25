@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.5',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.6',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 M.fields={
   inputGauge={label="Voltage entering variacs",help="Required. Voltage gauge AFTER the entry transformer, BEFORE stage A."},
@@ -118,20 +118,49 @@ end
 function M.positions(s)
   local banks={}
   for i,key in ipairs({'A','B','C'}) do
-    local bank={members={},low=1,high=0}; banks[i]=bank
+    local bank={members={},low=1,high=0,moving=false}; banks[i]=bank
     for _,name in ipairs(s['variacs'..key]) do
       local v=M.device(name).getStatus()
       assert(type(v)=='table' and M.finite(v.position) and v.position>=0 and v.position<=1,'Invalid position '..name)
       assert(M.finite(v.ratio) and math.abs(v.ratio-(.01+.99*v.position))<.001,'Invalid ratio '..name)
-      bank.members[#bank.members+1]={name=name,position=v.position}; bank.low=math.min(bank.low,v.position); bank.high=math.max(bank.high,v.position)
+      assert(M.finite(v.shaftSpeed),'Invalid shaftSpeed '..name)
+      bank.moving=bank.moving or v.shaftSpeed~=0
+      bank.members[#bank.members+1]={name=name,position=v.position,shaftSpeed=v.shaftSpeed}; bank.low=math.min(bank.low,v.position); bank.high=math.max(bank.high,v.position)
     end
     bank.position=bank.members[1].position
     bank.aligned=bank.high==bank.low -- Parallel members must report identical positions.
   end
   return banks
 end
+-- Two consecutive snapshots avoid comparing positions from opposite sides
+-- of a movement boundary. A gearbox reporting idle alone is not enough.
+function M.stationaryBanks(s)
+  local idle={}
+  for i,key in ipairs({'A','B','C'}) do idle[i]=M.device(s['gear'..key]).isRunning()==false end
+  local before,after=M.positions(s),M.positions(s)
+  local all=true
+  for i,bank in ipairs(after) do
+    bank.stationary=idle[i] and M.device(s['gear'..string.char(64+i)]).isRunning()==false and not before[i].moving and not bank.moving
+    for j,member in ipairs(bank.members) do
+      if member.position~=before[i].members[j].position then bank.stationary=false end
+    end
+    all=all and bank.stationary
+  end
+  return after,all
+end
 function M.aligned(s,banks)
-  for i,bank in ipairs(banks or M.positions(s)) do assert(bank.aligned,'bank_misaligned: stage '..i) end
+  banks=banks or M.stationaryBanks(s)
+  for i,bank in ipairs(banks) do
+    assert(bank.stationary,'Variacs still moving: stage '..i)
+    assert(bank.aligned,'bank_misaligned: stage '..i)
+  end
+end
+function M.checkAlignment(s)
+  local banks,stationary=M.stationaryBanks(s)
+  for i,bank in ipairs(banks) do
+    if bank.stationary then assert(bank.aligned,'bank_misaligned: stage '..i) end
+  end
+  return banks,stationary
 end
 function M.voltage(name) local v=M.device(name).voltage(); assert(M.finite(v),'Invalid voltage '..name); return math.abs(v) end
 function M.contacts(s)

@@ -7,6 +7,7 @@ function M.new(R)
   local lastSaved,expected,processed=nil,{},{}
   local temperatures={}
   local thermalReady=false
+  local movingSince={}
   local function save()
     local value=policy.export(); local encoded=textutils.serializeJSON(value)
     if encoded~=lastSaved then U.write('distributed-thermal.json',value); lastSaved=encoded end
@@ -22,12 +23,12 @@ function M.new(R)
         end)
         local fault=policy.update(name,ok and v or nil,R.now()/1000,'measured')
         temperatures[#temperatures+1]={name=name,stage=i,temperature=ok and v or nil,reason=not ok and tostring(v) or nil,sampledAt=R.now()}
-        if fault and not R.state.latched then R.trip(fault.code,fault.reason,fault) end
+        if fault and (not R.state.latched or R.state.realignRequested) then R.trip(fault.code,fault.reason,fault) end
       end
     end
     local fault=policy.check(R.now()/1000); save()
     R.state.thermal=policy.status(R.now()/1000); R.state.temperatures=temperatures; thermalReady=true
-    if fault and not R.state.latched then R.trip(fault.code,fault.reason,fault) end
+    if fault and (not R.state.latched or R.state.realignRequested) then R.trip(fault.code,fault.reason,fault) end
   end
   local function banksReady()
     U.aligned(s); assert(U.idle(s),'Gearshift still moving')
@@ -46,7 +47,7 @@ function M.new(R)
       end
     end
     if R.state.latched then
-      expected={}
+      expected={}; movingSince={}
       for name,v in pairs(contacts) do
         if v.closed then R.trip('unexpected_closed','Contact closed while latched',{breaker=name}); return end
       end
@@ -54,7 +55,14 @@ function M.new(R)
     end
     if energized then
       local peer=R.fresh('regulation'); assert(peer and peer.cycle==R.state.cycle and not peer.latched,'Regulation heartbeat unavailable or not ready')
-      U.aligned(s) -- Always, including moving shafts.
+      local banks=U.checkAlignment(s)
+      for i,bank in ipairs(banks) do
+        if bank.stationary then movingSince[i]=nil
+        else
+          movingSince[i]=movingSince[i] or R.now()
+          assert(R.now()-movingSince[i]<s.moveTimeout*1000,'variac_stuck: stage '..i..' did not stop')
+        end
+      end
       local input=U.voltage(s.inputGauge); local output=U.voltage(s.outputGauge)
       R.state.inputVoltage=input; R.state.outputVoltage=output
       assert(input>1 and input<=s.maxInputVolts,'Input voltage outside safe range')
@@ -106,8 +114,11 @@ function M.new(R)
   local function command(m)
     if m.kind=='start' then
       if not R.state.latched then R.state.message='Already running.'; return end
+      local generation=R.state.generation
       assert(U.isolated(s) and U.idle(s),'Reset requires verified open contacts and idle drives')
+      assert(generation==R.state.generation,'A new trip superseded the start request')
       local ok,why=policy.reset(R.now()/1000); assert(ok,why); save()
+      assert(generation==R.state.generation,'A new trip superseded the start request')
       R.clearFaults(); R.state.cycle=R.token(); R.state.phase='armed'; expected={}; processed={}
       R.persist(); R.publish('arm',{cycle=R.state.cycle,target=R.state.target})
     elseif m.kind=='target' then
@@ -141,6 +152,23 @@ function M.new(R)
             end
           else R.state.message='Waiting for regulation before automatic restart.' end
         end
+        if R.state.realignRequested and R.state.latched and thermalReady then
+          local peer=R.fresh('regulation')
+          if peer and peer.latched then
+            if not (peer.realignRequested or peer.runRequested) then
+              R.trip('realignment_blocked','Regulation has another stop/fault; manual reset required')
+            elseif U.isolated(s) and U.idle(s) then
+              local fault=policy.check(R.now()/1000)
+              if fault then R.trip(fault.code,fault.reason,fault)
+              else
+                -- Start uses the same fresh-temperature reset and isolated
+                -- homing path as a manual start. Nothing closes here.
+                local accepted,reason=pcall(command,{kind='start',data={}})
+                if not accepted then R.trip('realignment_blocked',tostring(reason)) end
+              end
+            end
+          else R.state.message='Alignment trip: waiting for isolated regulation worker.' end
+        end
         local m=R.commands[1]
         if m and (m.kind~='start' or thermalReady) then
           table.remove(R.commands,1)
@@ -156,7 +184,7 @@ function M.new(R)
           if not peer or peer.cycle~=R.state.cycle then R.publish('arm',{cycle=R.state.cycle,target=R.state.target}) end
         end
       end)
-      if not ok then R.trip('protection_interlock',tostring(why)) end
+      if not ok then local reason=tostring(why); R.trip(reason:find('bank_misaligned',1,true) and 'bank_misaligned' or reason:find('variac_stuck',1,true) and 'variac_stuck' or 'protection_interlock',reason) end
       sleep(.05)
     end
   end

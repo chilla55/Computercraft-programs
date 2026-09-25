@@ -146,7 +146,7 @@ if node.role~='master' or command=='trip' then
 end
 if command=='trip' then
   local saved=U.read('distributed-state.json')
-  if saved then saved.runRequested=false; saved.latched=true; U.write('distributed-state.json',saved) end
+  if saved then saved.runRequested=false; saved.realignRequested=false; saved.latched=true; U.write('distributed-state.json',saved) end
   print('All configured breakers verified open; automatic restart disabled.'); return
 end
 D.open(node.modem); D.host(node.config.cluster or 'transformer',node.role)

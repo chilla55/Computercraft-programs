@@ -10,7 +10,7 @@ function M.new(R)
     if isolated then assert(U.isolated(s),'Input/output contacts must be open for homing')
     else
       for _,name in ipairs(s.inputBreakers) do assert(U.device(name).isClosed(),'unknown_opening: input contact unexpectedly open') end
-      U.aligned(s)
+      U.checkAlignment(s)
       local input=U.voltage(s.inputGauge)
       assert(input>1 and input<=s.maxInputVolts,'Invalid regulator input')
       if R.state.phase=='live' then
@@ -22,22 +22,28 @@ function M.new(R)
     guard(isolated); sleep(dt or .05); guard(isolated)
   end
   local function settle(i,isolated)
-    local gear=U.device(s['gear'..string.char(64+i)]); local untilAt=R.now()+s.moveTimeout*1000
-    local last,stable=nil,0
-    repeat
+    local untilAt=R.now()+s.moveTimeout*1000
+    while true do
+      guard(isolated)
+      local banks,stationary=U.stationaryBanks(s)
+      -- In-service movement must pass every bank before another step begins.
+      -- Isolated homing is allowed to start with mismatched members.
+      if not isolated then
+        for stage,bank in ipairs(banks) do
+          if bank.stationary then assert(bank.aligned,'bank_misaligned: stage '..stage) end
+        end
+      end
+      if stationary then return banks[i] end
+      assert(R.now()<untilAt,'variac_stuck: stage '..i..' failed to stop')
       pause(.05,isolated)
-      local bank=U.positions(s)[i]; local delta=0
-      if last then for j,m in ipairs(bank.members) do delta=math.max(delta,math.abs(m.position-last.members[j].position)*s.travelDegrees) end end
-      if last and delta<.02 and not gear.isRunning() then stable=stable+1 else stable=0 end
-      last=bank; assert(R.now()<untilAt,'variac_stuck: stage '..i..' failed to settle')
-    until stable>=4
-    return last
+    end
   end
   local function move(i,degrees,direction,isolated)
     guard(isolated)
     local gear=U.device(s['gear'..string.char(64+i)])
     assert(not gear.isRunning(),'Drive already running: stage '..i)
     gear.rotate(math.abs(degrees),direction)
+    sleep(.05) -- Allow the native movement command to reach the next tick.
     return settle(i,isolated)
   end
   local function direction(i)
@@ -69,6 +75,7 @@ function M.new(R)
     for _,sign in ipairs({-1,1}) do
       for i=1,3 do
         if plan[i]*sign>0 then
+          U.aligned(s)
           local before=U.positions(s)[i]; local after=move(i,math.abs(plan[i]),sign*directions[i],false)
           for j,member in ipairs(after.members) do
             local expected=math.max(0,math.min(1,before.members[j].position+plan[i]/s.travelDegrees))
@@ -124,7 +131,7 @@ function M.new(R)
       if R.state.latched or not R.state.cycle or not peer or peer.latched or peer.cycle~=R.state.cycle then sleep(.1)
       else
         local ok,why=pcall(operate)
-        if not ok then R.trip(tostring(why):find('unknown_opening',1,true) and 'unknown_opening' or tostring(why):find('bank_misaligned',1,true) and 'bank_misaligned' or tostring(why):find('variac_stuck',1,true) and 'variac_stuck' or 'regulation_fault',tostring(why)) end
+        if not ok and not R.state.latched then R.trip(tostring(why):find('unknown_opening',1,true) and 'unknown_opening' or tostring(why):find('bank_misaligned',1,true) and 'bank_misaligned' or tostring(why):find('variac_stuck',1,true) and 'variac_stuck' or 'regulation_fault',tostring(why)) end
       end
     end
   end}
