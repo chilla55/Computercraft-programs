@@ -16,6 +16,7 @@ local function world(restore,thermalFault,options)
   if options.multiInput then settings.inputBreakers={'input','input2'} end
   local W={time=0,nodes={},contacts={input=false,plus=false,minus=false},positions={a1=.8,a2=.5,b1=.9,c1=.98},temperature={},motion={},moves={},closes={},drop={}}
   if options.multiInput then W.contacts.input2=false end
+  if options.lowStart then for name in pairs(W.positions) do W.positions[name]=.05 end end
   local function powered() for _,name in ipairs(settings.inputBreakers) do if not W.contacts[name] then return false end end; return true end
   local function serialize(v)
     if type(v)=='string' then return string.format('%q',v) end
@@ -60,7 +61,7 @@ local function world(restore,thermalFault,options)
         local timer=env.os.startTimer(timeout)
         while true do local e={env.os.pullEvent()}; if e[1]=='rednet_message' and e[4]==protocol then return e[2],e[3],e[4] end; if e[1]=='timer' and e[2]==timer then return nil end end
       end}
-    local function native() env.sleep(.001) end
+    local function native() env.sleep(options.nativeDelay or .001) end
     local devices={back={isWireless=function() return true end}}
     for name in pairs(W.contacts) do
       devices[name]={isClosed=function() native(); return W.contacts[name] end,
@@ -73,14 +74,18 @@ local function world(restore,thermalFault,options)
       getThermalStatus=function() native(); return {available=true,unit='C',temperature=W.temperature[name] or 100} end} end
     for i,key in ipairs({'A','B','C'}) do devices[settings['gear'..key]]={isRunning=function() native(); return false end,
       rotate=function(degrees,direction)
-        native(); W.moves[#W.moves+1]={degrees=degrees,isolated=not W.contacts.input and not W.contacts.plus and not W.contacts.minus}
-        for name in pairs(W.motion) do error('New movement before shaft stopped: '..name) end
+        native(); W.moves[#W.moves+1]={phase=N.R.state.phase,stage=i,at=W.time,degrees=degrees,isolated=not W.contacts.input and not W.contacts.plus and not W.contacts.minus}
+        for name in pairs(W.motion) do
+          assert(N.R.state.phase=='positioning' and not W.contacts.plus and not W.contacts.minus,'New movement before shaft stopped: '..name)
+          W.concurrentStartup=true
+        end
+        if N.R.state.startupPlan then W.maxStartupAttempt=math.max(W.maxStartupAttempt or 0,N.R.state.startupPlan.attempt) end
         for _,name in ipairs(settings['variacs'..key]) do
-          if name~=W.jammed then W.motion[name]={from=W.positions[name],to=math.max(0,math.min(1,W.positions[name]+degrees*direction/315)),start=W.time,finish=W.time+.15} end
+          if name~=W.jammed then W.motion[name]={from=W.positions[name],to=math.max(0,math.min(1,W.positions[name]+degrees*direction/315)),start=W.time,finish=W.time+(N.R.state.phase=='positioning' and options.startupMoveTime or .15)} end
         end
       end} end
     devices.vin={voltage=function() native(); return powered() and 1500 or 0 end}
-    devices.vout={voltage=function() native(); local value=powered() and 3750 or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; return value end}
+    devices.vout={voltage=function() native(); local value=powered() and 3750*(options.voltageScale or 1) or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; return value end}
     env.peripheral={wrap=function(name) return devices[name] end}; env.print=function() end
     local function mod(name) return assert(loadfile(base..name..'.lua','t',env))() end
     local modules={common=mod('common'),thermal=mod('thermal_protection'),planner=mod('planner'),hash=mod('sha256'),updater=mod('updater')}
@@ -199,4 +204,33 @@ failed.untilTrue(function() return failed.nodes[3].R.fresh('regulation')~=nil en
 failed.command('start')
 check(failed.untilTrue(function() return failed.nodes[3].R.state.phase=='tripped' and not failed.contacts.input end,150),'failed second input did not trip/open first input')
 check(not failed.contacts.plus and not failed.contacts.minus,'output closed despite failed input connection')
+local direct=world(nil,nil,{lowStart=true,startupMoveTime=6,nativeDelay=.01})
+direct.untilTrue(function() return direct.nodes[3].R.fresh('regulation')~=nil end,3); direct.command('start')
+check(direct.untilTrue(function() return direct.nodes[2].R.state.phase=='live' end,60),'calculated simultaneous startup did not converge')
+check(direct.concurrentStartup and direct.maxStartupAttempt==1,'startup did not issue one concurrent calculated plan')
+local first,last
+for _,move in ipairs(direct.moves) do if move.phase=='positioning' then first=first or move.at; last=move.at end end
+check(first and last-first<1,'startup waited for one bank before starting the others')
+local fullTravel=false; for _,move in ipairs(direct.moves) do if move.phase=='positioning' and move.degrees>16 then fullTravel=true end end
+check(fullTravel,'startup split full travel into live-regulation steps')
+local corrected=world(nil,nil,{lowStart=true,voltageScale=.95})
+corrected.untilTrue(function() return corrected.nodes[3].R.fresh('regulation')~=nil end,3); corrected.command('start')
+check(corrected.untilTrue(function() return corrected.nodes[2].R.state.phase=='live' end,60),'measured voltage correction failed')
+check(corrected.maxStartupAttempt==2,'startup correction was not a bounded recalculation')
+local unreachable=world(nil,nil,{lowStart=true,voltageScale=.5})
+unreachable.untilTrue(function() return unreachable.nodes[3].R.fresh('regulation')~=nil end,3); unreachable.command('start')
+check(unreachable.untilTrue(function() return unreachable.nodes[2].R.state.phase=='tripped' end,60),'unreachable startup did not trip')
+check(not unreachable.contacts.plus and not unreachable.contacts.minus,'unverified voltage connected to output')
+for _,temperature in ipairs({140,126}) do
+ local hot=world(nil,nil,{lowStart=true,startupMoveTime=10})
+ hot.untilTrue(function() return hot.nodes[3].R.fresh('regulation')~=nil end,3); hot.command('start')
+ check(hot.untilTrue(function() return hot.nodes[2].R.state.phase=='positioning' and next(hot.motion)~=nil end,30),'long startup movement did not begin')
+ local started=hot.time; hot.temperature.a2=temperature
+ check(hot.untilTrue(function() return not hot.contacts.input and hot.nodes[3].R.state.phase=='tripped' end,temperature==140 and 1 or 6),'thermal protection stalled during startup movement')
+ check(hot.time-started<10 and not hot.contacts.plus and not hot.contacts.minus,'thermal trip waited for movement or connected output')
+ hot.untilTrue(function() return false end,.2)
+ local thermalReason=false
+ for _,event in ipairs(hot.nodes[3].R.events) do if event.detail and event.detail.member=='a2' and event.code:match('^thermal_') then thermalReason=true end end
+ check(thermalReason and not hot.nodes[3].R.state.realignRequested,'thermal fault missing member or incorrectly scheduled alignment recovery')
+end
 print(('PASS: %d distributed integration checks'):format(checks))

@@ -104,6 +104,7 @@ function M.new(screen,c,clock)
     elseif tab=='Variacs' then
       for i,s in ipairs(data.stages) do
         row(compact and ('Stage '..i) or ('Stage '..i..' / '..s.gear))
+        if s.targetDegrees then row('Goal '..fmt(s.targetDegrees,' deg')) end
         for _,m in ipairs(s.members) do
           row(' '..m.name)
           row((compact and '' or '   ')..fmt(m.position and m.position*100,'%')..(compact and ' ' or '   ')..fmt(m.temperature,'C'))

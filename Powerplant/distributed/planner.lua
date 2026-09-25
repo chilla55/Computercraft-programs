@@ -1,7 +1,7 @@
 -- Same calibrated whole-degree search as the standalone regulator, pure inputs.
 local M={}
 function M.ratio(p) return .00999996389330349+.989990071137444*p end
-function M.choose(s,banks,input,output,target,limit,yieldFn)
+function M.choose(s,banks,input,output,target,limit,yieldFn,simultaneous)
   local angle,lo,hi={},{},{}
   local product=1
   for i=1,3 do angle[i]=banks[i].position*s.travelDegrees; product=product*M.ratio(banks[i].position); lo[i]=math.max(-limit,math.ceil(-angle[i])); hi[i]=math.min(limit,math.floor(s.travelDegrees-angle[i])) end
@@ -11,9 +11,10 @@ function M.choose(s,banks,input,output,target,limit,yieldFn)
     if c<lo[3] or c>hi[3] then return end
     local predicted=basis*M.ratio((angle[1]+a)/s.travelDegrees)*M.ratio((angle[2]+b)/s.travelDegrees)*M.ratio((angle[3]+c)/s.travelDegrees)
     local err,travel=math.abs(predicted-target),math.abs(a)+math.abs(b)+math.abs(c)
+    local cost=simultaneous and math.max(math.abs(a),math.abs(b),math.abs(c)) or travel
     local inside=err<=s.accuracyVolts/2
-    if not best or (inside and not best.inside) or (inside==best.inside and ((inside and (travel<best.travel or travel==best.travel and err<best.err)) or (not inside and err<best.err))) then
-      best={a,b,c,err=err,travel=travel,predicted=predicted,inside=inside}
+    if not best or (inside and not best.inside) or (inside==best.inside and ((inside and (cost<best.cost or cost==best.cost and err<best.err)) or (not inside and err<best.err))) then
+      best={a,b,c,err=err,travel=travel,predicted=predicted,inside=inside,cost=cost}
     end
   end
   local rows=0
@@ -28,5 +29,16 @@ function M.choose(s,banks,input,output,target,limit,yieldFn)
     rows=rows+1; if rows%8==0 and yieldFn then yieldFn() end
   end
   return assert(best,'No available variac setting')
+end
+-- Absolute destinations derived from one input snapshot. Whole-degree
+-- commands respect each shaft's current fractional-angle offset.
+function M.initial(s,banks,input,output,target,yieldFn)
+  local plan=M.choose(s,banks,input,output,target,math.ceil(s.travelDegrees),yieldFn,true)
+  plan.positions={}; plan.degrees={}
+  for i=1,3 do
+    plan.positions[i]=math.max(0,math.min(1,banks[i].position+plan[i]/s.travelDegrees))
+    plan.degrees[i]=plan.positions[i]*s.travelDegrees
+  end
+  return plan
 end
 return M

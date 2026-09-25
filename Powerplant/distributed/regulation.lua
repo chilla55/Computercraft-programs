@@ -34,7 +34,15 @@ function M.new(R)
         end
       end
       if stationary then return banks[i] end
-      assert(R.now()<untilAt,'variac_stuck: stage '..i..' failed to stop')
+      if R.now()>=untilAt then
+        for stage,bank in ipairs(banks) do
+          if not bank.stationary then
+            local name=bank.members[1].name
+            for _,member in ipairs(bank.members) do if member.shaftSpeed~=0 then name=member.name; break end end
+            error('variac_stuck: stage '..stage..' '..name..' failed to stop')
+          end
+        end
+      end
       pause(.05,isolated)
     end
   end
@@ -92,19 +100,68 @@ function M.new(R)
       end
     end
   end
-  local function tune(live)
+  local function tune()
     local input,output=U.voltage(s.inputGauge),U.voltage(s.outputGauge)
     local target=R.state.activeTarget; local err=math.abs(output-target)
     if err<=s.accuracyVolts then return true end
-    local limit=live and (err<=target*.02 and 1 or 16) or math.ceil(s.travelDegrees)
+    local limit=err<=target*.02 and 1 or 16
     local plan=P.choose(s,U.positions(s),input,output,target,limit,function() pause(.01,false) end)
     if plan.travel==0 or plan.err>=err-.001 then
       if err<=s.fallbackVolts then return true end
-      if live and limit==1 then plan=P.choose(s,U.positions(s),input,output,target,16,function() pause(.01,false) end) end
+      if limit==1 then plan=P.choose(s,U.positions(s),input,output,target,16,function() pause(.01,false) end) end
       assert(plan.travel>0 and plan.err<err-.001,'Target unreachable at current input/load')
     end
     apply(plan); pause(s.settleSeconds or .2,false)
     return math.abs(U.voltage(s.outputGauge)-target)<=s.fallbackVolts
+  end
+  local function initialTune()
+    local input,output
+    for attempt=1,3 do
+      guard(false)
+      assert(U.device(s.plusBreaker).isClosed()==false and U.device(s.minusBreaker).isClosed()==false,'Output must remain isolated during startup positioning')
+      local before=U.stationaryBanks(s); U.aligned(s,before)
+      input,output=U.voltage(s.inputGauge),U.voltage(s.outputGauge)
+      if math.abs(output-R.state.activeTarget)<=s.fallbackVolts then return end
+      R.state.phase='planning'
+      local plan=P.initial(s,before,input,attempt>1 and output or nil,R.state.activeTarget,function()
+        -- Yield for independent protection/heartbeats without rescanning every
+        -- wired peripheral inside a pure mathematical search.
+        assert(not R.state.latched,'Startup planning interrupted by trip')
+        local peer=R.fresh('protection')
+        assert(peer and not peer.latched and peer.cycle==R.state.cycle,'Protection unavailable during startup planning')
+        sleep(0)
+      end)
+      assert(plan.err<=s.fallbackVolts,('Startup target unreachable: predicted %.2f V, target %.2f V'):format(plan.predicted,R.state.activeTarget))
+      assert(plan.travel>0,'Startup voltage does not match the calculated position; check gauges and ratios')
+      guard(false)
+      local checked=U.stationaryBanks(s); U.aligned(s,checked)
+      for i=1,3 do assert(checked[i].position==before[i].position,'Variac position changed during planning: stage '..i) end
+      R.state.startupPlan={positions=plan.positions,degrees=plan.degrees,predicted=plan.predicted,target=R.state.activeTarget,attempt=attempt}
+      R.state.phase='positioning'
+      local generation=R.state.generation
+      -- Start each independent bank drive without waiting for the other banks
+      -- to finish. No further plan is issued until ALL shafts stop and align.
+      for i=1,3 do
+        if plan[i]~=0 then
+          assert(not R.state.latched and R.state.generation==generation,'Trip superseded startup movement')
+          U.device(s['gear'..string.char(64+i)]).rotate(math.abs(plan[i]),(plan[i]>0 and 1 or -1)*directions[i])
+        end
+      end
+      sleep(.05)
+      settle(1,false)
+      local after=U.stationaryBanks(s); U.aligned(s,after)
+      for i,bank in ipairs(after) do
+        for _,member in ipairs(bank.members) do
+          assert(math.abs(member.position-plan.positions[i])*s.travelDegrees<=s.positionToleranceDegrees+1e-9,
+            'variac_stuck: stage '..i..' '..member.name..' did not reach calculated startup position')
+        end
+      end
+      R.state.phase='tuning'
+      pause(s.settleSeconds or .2,false)
+      output=U.voltage(s.outputGauge)
+      if math.abs(output-R.state.activeTarget)<=s.fallbackVolts then return end
+    end
+    error(('Startup voltage verification failed after 3 calculated plans: measured %.2f V, target %.2f V. Check input stability, gauges and transformer ratios.'):format(output,R.state.activeTarget))
   end
   local function operate()
     R.state.phase='homing'; guard(true)
@@ -118,9 +175,8 @@ function M.new(R)
     U.aligned(s); assert(U.idle(s),'Drives not idle')
     R.state.activeTarget=R.state.target
     request('input'); R.state.phase='tuning'
-    local deadline=R.now()+120000
-    while not tune(false) do assert(R.now()<deadline,'Initial tuning timed out') end
-    request('output'); R.state.phase='live'
+    initialTune()
+    request('output'); R.state.phase='live'; R.state.startupPlan=nil
     local last=R.now()
     while true do
       guard(false)
@@ -129,7 +185,7 @@ function M.new(R)
       if math.abs(U.voltage(s.outputGauge)-R.state.activeTarget)<=s.fallbackVolts then
         local d=R.state.target-R.state.activeTarget; R.state.activeTarget=R.state.activeTarget+math.max(-step,math.min(step,d))
       end
-      tune(true); pause(s.pollSeconds or .1,false)
+      tune(); pause(s.pollSeconds or .1,false)
     end
   end
   return {run=function()

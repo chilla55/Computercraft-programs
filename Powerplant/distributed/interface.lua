@@ -69,7 +69,7 @@ function M.run(R)
     end
     local temps={}; if protection then for _,v in ipairs(protection.temperatures or {}) do if R.now()-v.sampledAt<=s.thermalMaxAgeSeconds*1000 then temps[v.name]=v.temperature end end end
     for i,key in ipairs({'A','B','C'}) do
-      local bank={gear=s['gear'..key],members={}}; data.stages[i]=bank
+      local bank={gear=s['gear'..key],members={},targetDegrees=regulation and regulation.startupPlan and regulation.startupPlan.degrees[i]}; data.stages[i]=bank
       for _,name in ipairs(s['variacs'..key]) do
         local read,v=pcall(function() return U.device(name).getStatus() end)
         bank.members[#bank.members+1]={name=name,position=read and v.position or nil,temperature=temps[name]}

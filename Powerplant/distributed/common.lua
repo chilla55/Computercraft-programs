@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.9',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.10',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 M.fields={
   inputGauge={label="Voltage entering variacs",help="Required. Voltage gauge AFTER the entry transformer, BEFORE stage A."},
@@ -18,7 +18,7 @@ M.fields={
   accuracyVolts={label="Preferred output accuracy (V)",help="Preferred difference from the desired output voltage."},
   fallbackVolts={label="Acceptable output error (V)",help="Allowed difference if the available variac positions cannot achieve the preferred accuracy. Also checked before output connection."},
   moveTimeout={label="Drive movement timeout (seconds)",help="Maximum wait for a sequenced gearbox movement to finish."},
-  chargeTimeout={label="Output tuning timeout (seconds)",help="Maximum time to tune the voltage before connecting the output."},
+  chargeTimeout={label="Breaker connection timeout (seconds)",help="Maximum wait for protection to connect the requested input or output breaker group."},
   positionToleranceDegrees={label="Movement verification tolerance (degrees)",help="Allowed difference between commanded and measured travel. This does NOT allow spread within a parallel bank: those positions must match exactly. Different stages may use different positions."},
   maxInputVolts={label="Maximum voltage entering variacs (V)",help="Trip limit measured AFTER the entry transformer, BEFORE stage A. This is not the generator voltage or spark-gap setting."},
   outputTripPercent={label="Output overvoltage trip margin (%)",help="Trip when measured output exceeds the active target by this percentage."},

@@ -5,28 +5,28 @@
       "size": 11788
     },
     "common.lua": {
-      "sha256": "1e5d3bf1c96d718488b2b581fb7fa3a2c3de1080fad45cf4dd70a18380231a83",
-      "size": 14699
+      "sha256": "8356ce058d2a9fcb6167106d4977af68d472b388c5dde1688e0435c3f49ef837",
+      "size": 14726
     },
     "discovery.lua": {
       "sha256": "865af6c3eecf0e8f293b64906967e88f86fc50223f88453bfc857ad2d716b761",
       "size": 1473
     },
     "interface.lua": {
-      "sha256": "2b2903219c2913249381dd106f0d7e76682f3c20373fa677dfb7b2b61503f860",
-      "size": 9035
+      "sha256": "fbcd94d8fce51d41803cdeee203f9f20f2976f83019fabb2d8d055782e73a016",
+      "size": 9125
     },
     "planner.lua": {
-      "sha256": "8bb220d860939266819126ed58466de0957cea59c6f8389bda5830c89151e26c",
-      "size": 1708
+      "sha256": "45fc27fc7c2467736424451e33f87f0b56f47d336323ff9c6e12991b94c86299",
+      "size": 2313
     },
     "protection.lua": {
       "sha256": "7d15ec79e009cf370213ce52d123b0e2153bba62e3e25ff1de3acf34d2b42ea8",
       "size": 10426
     },
     "regulation.lua": {
-      "sha256": "cd3e7ff75cb716fa6fb225955653547cd394861533006ee6c0f76fa398e7527a",
-      "size": 7253
+      "sha256": "c116696f1e0c2859a9c09b845f26618b71c1954d5d968facb8816b72a2ce4a8c",
+      "size": 10384
     },
     "runtime.lua": {
       "sha256": "21ab09b972f465a942f2161af5dc42a106fd76e80d25aa380e950209f9bc5624",
@@ -45,15 +45,15 @@
       "size": 2631
     },
     "ui.lua": {
-      "sha256": "fb36434beea6dedf819db23e67ac571d51134d72e1f6ddff091ada3724c763eb",
-      "size": 13996
+      "sha256": "7323888714577e49215ad01c5f0fb3037fd2b894bf862e4b6b41427f4030da7f",
+      "size": 14074
     },
     "updater.lua": {
       "sha256": "aa22dbc375f16eb5d202226560aabd50ce602395cd926ebdd925b95c9869a256",
       "size": 14695
     }
   },
-  "ref": "distributed-1.1.9",
+  "ref": "distributed-1.1.10",
   "schema": 1,
-  "version": "distributed-1.1.9"
+  "version": "distributed-1.1.10"
 }
