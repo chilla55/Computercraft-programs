@@ -1,7 +1,7 @@
 -- Same calibrated whole-degree search as the standalone regulator, pure inputs.
 local M={}
 function M.ratio(p) return .00999996389330349+.989990071137444*p end
-function M.choose(s,banks,input,output,target,limit,yieldFn,simultaneous)
+function M.choose(s,banks,input,output,target,limit,yieldFn,simultaneous,preferBalance)
   local angle,lo,hi={},{},{}
   local product=1
   for i=1,3 do angle[i]=banks[i].position*s.travelDegrees; product=product*M.ratio(banks[i].position); lo[i]=math.max(-limit,math.ceil(-angle[i])); hi[i]=math.min(limit,math.floor(s.travelDegrees-angle[i])) end
@@ -13,9 +13,10 @@ function M.choose(s,banks,input,output,target,limit,yieldFn,simultaneous)
     local err,travel=math.abs(predicted-target),math.abs(a)+math.abs(b)+math.abs(c)
     local cost=simultaneous and math.max(math.abs(a),math.abs(b),math.abs(c)) or travel
     local spread=math.max(angle[1]+a,angle[2]+b,angle[3]+c)-math.min(angle[1]+a,angle[2]+b,angle[3]+c)
+    local rankSpread=preferBalance==false and 0 or spread
     local inside=err<=s.accuracyVolts/2
-    if not best or (inside and not best.inside) or (inside==best.inside and ((inside and (spread<best.spread-1e-9 or math.abs(spread-best.spread)<=1e-9 and (cost<best.cost or cost==best.cost and err<best.err))) or (not inside and err<best.err))) then
-      best={a,b,c,err=err,travel=travel,predicted=predicted,inside=inside,cost=cost,spread=spread}
+    if not best or (inside and not best.inside) or (inside==best.inside and ((inside and (rankSpread<best.rankSpread-1e-9 or math.abs(rankSpread-best.rankSpread)<=1e-9 and (cost<best.cost or cost==best.cost and err<best.err))) or (not inside and err<best.err))) then
+      best={a,b,c,err=err,travel=travel,predicted=predicted,inside=inside,cost=cost,spread=spread,rankSpread=rankSpread}
     end
   end
   local rows=0
@@ -53,6 +54,27 @@ function M.initial(s,banks,input,output,target,yieldFn,limit)
     plan.positions[i]=math.max(0,math.min(1,banks[i].position+plan[i]/s.travelDegrees))
     plan.degrees[i]=plan.positions[i]*s.travelDegrees
   end
+  return plan
+end
+-- A saved preset is only a starting guess. Never authorizes breaker closure.
+function M.cached(s,banks,entry,input,target,key)
+  local function finite(v) return type(v)=='number' and v==v and math.abs(v)<math.huge end
+  if type(entry)~='table' or entry.schema~=1 or entry.key~=key or entry.target~=target
+    or not finite(entry.input) or entry.input<=1 or not finite(entry.output) or entry.output<=1
+    or math.abs(entry.output-target)>s.fallbackVolts or type(entry.positions)~='table' or #entry.positions~=3 then return end
+  if math.abs(input-entry.input)*entry.output/entry.input>10 then return end
+  local plan={positions={},degrees={},travel=0,predicted=entry.output*input/entry.input}
+  for i=1,3 do
+    local saved=entry.positions[i]
+    if not finite(saved) or saved<0 or saved>1 then return end
+    local angle=banks[i].position*s.travelDegrees
+    local delta=math.floor((saved-banks[i].position)*s.travelDegrees+.5)
+    delta=math.max(math.ceil(-angle),math.min(math.floor(s.travelDegrees-angle),delta))
+    plan[i]=delta; plan.travel=plan.travel+math.abs(delta)
+    plan.positions[i]=(angle+delta)/s.travelDegrees; plan.degrees[i]=angle+delta
+    plan.predicted=plan.predicted*M.ratio(plan.positions[i])/M.ratio(saved)
+  end
+  plan.err=math.abs(plan.predicted-target)
   return plan
 end
 return M

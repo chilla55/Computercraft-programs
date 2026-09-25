@@ -55,4 +55,15 @@ for line in io.lines('Powerplant/distributed/tests/fixtures/variac-calibration.t
  end
 end
 check(count==316 and maxError<2e-7,'planner does not match supplied single-variac calibration')
+local settings={travelDegrees=315,stepUp=2.5,accuracyVolts=.1,fallbackVolts=1}
+local entry={schema=1,key='hardware',target=2640,input=1450,output=2640,positions={.854,.851,.854}}
+local start={{position=.2},{position=.3},{position=.4}}
+local cached=P.cached(settings,start,entry,1450,2640,'hardware')
+check(cached and cached.travel>0,'valid learned preset not available')
+for i=1,3 do check(math.abs(cached.positions[i]-entry.positions[i])*315<=.5,'cached destination not nearest reachable position') end
+check(not P.cached(settings,start,entry,1500,2640,'hardware'),'changed input reused preset')
+check(not P.cached(settings,start,entry,1450,2400,'hardware'),'changed target reused preset')
+check(not P.cached(settings,start,entry,1450,2640,'changed hardware'),'changed configuration reused preset')
+entry.positions[2]=0/0
+check(not P.cached(settings,start,entry,1450,2640,'hardware'),'invalid saved position accepted')
 print(('PASS: %d calculated startup planner checks'):format(n))

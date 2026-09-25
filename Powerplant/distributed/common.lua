@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.13',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.14',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 M.fields={
   inputGauge={label="Voltage entering variacs",help="Required. Voltage gauge AFTER the entry transformer, BEFORE stage A."},
@@ -45,7 +45,7 @@ function M.canonical(v)
   local out={'{'}; for _,k in ipairs(keys) do out[#out+1]=M.canonical(k)..'='..M.canonical(v[k])..';' end
   out[#out+1]='}'; return table.concat(out)
 end
-local configFiles={['distributed-node.json']=true,['distributed-state.json']=true,['distributed-thermal.json']=true,['dual-variac-config.json']=true}
+local configFiles={['distributed-startup.json']=true,['distributed-node.json']=true,['distributed-state.json']=true,['distributed-thermal.json']=true,['dual-variac-config.json']=true}
 function M.configPath(path) return configFiles[path] and '/config/'..path or path end
 function M.read(path)
   local original=path; path=M.configPath(path)

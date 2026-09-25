@@ -27,6 +27,7 @@ local function world(restore,thermalFault,options)
   for _,role in ipairs(U.roles) do
     local N={id=cfg.ids[role],role=role,queue={},timers={},files={},timer=0}; W.nodes[N.id]=N
     if restore then N.files['/config/distributed-state.json']=serialize(restore[role] or {events={},latched=true,runRequested=false}) end
+    if options.cachedPreset and role=='regulation' then N.files['/config/distributed-startup.json']=options.cachedPreset end
     if thermalFault and role=='protection' then N.files['/config/distributed-thermal.json']=serialize({version=2,members={},fault={code='thermal_overtemperature',reason='Saved thermal trip'}}) end
     local env=setmetatable({}, {__index=_G}); env._G=env
     env.os={epoch=function() return W.time*1000 end,clock=function() return W.time end,getComputerID=function() return N.id end,
@@ -92,7 +93,7 @@ local function world(restore,thermalFault,options)
       end
       return powered() and (W.inputVoltage or 1500) or 0
     end}
-    devices.vout={voltage=function() native(); local value=powered() and 3750*(options.voltageScale or 1) or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; if options.transientInBand and role=='regulation' and N.R.state.phase=='tuning' and W.maxStartupAttempt==1 and not W.transientUsed then W.transientUsed=true; return settings.target end; if options.oscillating then value=value*((W.maxStartupAttempt or 0)%2==0 and .97 or 1.03) end; return options.voltageExponent and 3750*(value/3750)^options.voltageExponent or value end}
+    devices.vout={voltage=function() native(); local value=powered() and 3750*(options.voltageScale or 1)*(W.loadScale or 1) or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; if options.transientInBand and role=='regulation' and N.R.state.phase=='tuning' and W.maxStartupAttempt==1 and not W.transientUsed then W.transientUsed=true; return settings.target end; if options.oscillating then value=value*((W.maxStartupAttempt or 0)%2==0 and .97 or 1.03) end; return options.voltageExponent and 3750*(value/3750)^options.voltageExponent or value end}
     env.peripheral={wrap=function(name) return devices[name] end}; env.print=function() end
     local function mod(name) return assert(loadfile(base..name..'.lua','t',env))() end
     local modules={common=mod('common'),thermal=mod('thermal_protection'),planner=mod('planner'),hash=mod('sha256'),updater=mod('updater')}
@@ -233,6 +234,28 @@ for _,sample in ipairs(fine.nodes[2].R.state.startupMeasurements) do
 end
 check(sawFine,'startup did not switch to fine feedback inside 10V')
 for _,move in ipairs(fine.moves) do if move.phase=='fine_tuning' then check(move.degrees<=16,'fine movement exceeded live algorithm limit') end end
+local preset=fine.nodes[2].files['/config/distributed-startup.json']
+check(type(preset)=='string','successful no-load startup did not save preset under /config')
+local reused=world(nil,nil,{lowStart=true,voltageScale=.999,cachedPreset=preset})
+reused.untilTrue(function() return reused.nodes[3].R.fresh('regulation')~=nil end,3); reused.command('start')
+check(reused.untilTrue(function() return reused.nodes[2].R.state.phase=='live' end,60),'cached startup did not reach service')
+check(reused.nodes[2].R.state.startupMeasurements[1].mode=='cached' and reused.maxStartupAttempt==1,'cached startup did not reuse learned bank positions')
+fine.loadScale=.97
+local function loadedError()
+ local v=3750*.999*.97
+ for _,name in ipairs({'a1','b1','c1'}) do v=v*(.00999996389330349+.989990071137444*fine.positions[name]) end
+ return math.abs(v-2640)
+end
+check(fine.untilTrue(function() return loadedError()<=1 end,120),'small-step live feedback did not recover load sag')
+check(fine.nodes[2].R.state.phase=='live','load correction tripped')
+local liveMoves=0
+for _,move in ipairs(fine.moves) do if move.phase=='live' then liveMoves=liveMoves+1; check(move.degrees<=1,'large bank movement issued under load') end end
+check(liveMoves>0,'load test did not exercise live movements')
+check(fine.nodes[2].files['/config/distributed-startup.json']==preset,'loaded operation overwrote no-load preset')
+local corrupt=world(nil,nil,{lowStart=true,cachedPreset='not a table'})
+corrupt.untilTrue(function() return corrupt.nodes[3].R.fresh('regulation')~=nil end,3); corrupt.command('start')
+check(corrupt.untilTrue(function() return corrupt.nodes[2].R.state.phase=='live' end,60),'corrupt optional preset prevented startup')
+check(corrupt.nodes[2].R.state.startupMeasurements[1].mode=='coarse','corrupt preset was used')
 local lost=world(nil,nil,{lowStart=true,voltageScale=.999,ignoreSmallMoves=true})
 lost.untilTrue(function() return lost.nodes[3].R.fresh('regulation')~=nil end,3); lost.command('start')
 check(lost.untilTrue(function() return lost.nodes[2].R.state.phase=='tripped' end,60),'lost small command passed movement tolerance')

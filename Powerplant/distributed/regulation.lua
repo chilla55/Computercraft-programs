@@ -3,6 +3,8 @@ local M={}
 function M.new(R)
   local U,s,P=R.U,R.config.settings,R.modules.planner
   local directions={}
+  local presetKey=R.modules.hash(U.canonical(s))
+  local presetPath='distributed-startup.json'
   local function guard(isolated)
     assert(not R.state.latched,'Regulation tripped/stopped')
     local protection=R.fresh('protection')
@@ -106,29 +108,36 @@ function M.new(R)
       end
     end
   end
-  local function feedbackPlan(banks,input,output,target,yieldFn)
+  local function feedbackPlan(banks,input,output,target,yieldFn,isolated)
     local err=math.abs(output-target)
-    local limit=err<=target*.02 and 1 or 16
-    local plan=P.choose(s,banks,input,output,target,limit,yieldFn)
-    if limit==1 and err>s.fallbackVolts and (plan.travel==0 or plan.err>=err-.001 or plan.err>s.fallbackVolts) then
-      plan=P.choose(s,banks,input,output,target,16,yieldFn)
+    local limit=isolated and err>target*.02 and 16 or 1
+    local plan=P.choose(s,banks,input,output,target,limit,yieldFn,false,false)
+    if isolated and limit==1 and err>s.fallbackVolts and (plan.travel==0 or plan.err>=err-.001 or plan.err>s.fallbackVolts) then
+      plan=P.choose(s,banks,input,output,target,16,yieldFn,false,false)
     end
     return plan
   end
+  local previousLive
   local function tune()
     local input,output=U.voltage(s.inputGauge),U.voltage(s.outputGauge)
     local target=R.state.activeTarget; local err=math.abs(output-target)
-    if err<=s.accuracyVolts then return true end
+    if err<=s.accuracyVolts then previousLive=nil; return true end
+    local previous=previousLive; previousLive={input=input,output=output}
+    if not previous or math.abs(output-previous.output)>s.fallbackVolts
+      or math.abs(input-previous.input)*target/math.max(input,1)>s.fallbackVolts then return false end
     local plan=feedbackPlan(U.positions(s),input,output,target,function() pause(.01,false) end)
     if plan.travel==0 or plan.err>=err-.001 then
       if err<=s.fallbackVolts then return true end
       error('Target unreachable at current input/load')
     end
-    apply(plan); pause(s.settleSeconds or .2,false)
+    apply(plan); previousLive=nil; pause(math.max(s.settleSeconds or .2,.5),false)
     return math.abs(U.voltage(s.outputGauge)-target)<=s.fallbackVolts
   end
   local function initialTune()
     local input,output
+    local loaded,preset=pcall(U.read,presetPath)
+    if not loaded then preset=nil end
+    R.state.startupPreset='Learning no-load preset'
     local function verified(output)
       for sample=1,3 do
         if math.abs(output-R.state.activeTarget)>s.fallbackVolts then return false,output end
@@ -157,9 +166,12 @@ function M.new(R)
       end
       local err=math.abs(output-R.state.activeTarget)
       local fine=err<=10
+      local cached=attempt==1 and P.cached(s,before,preset,input,R.state.activeTarget,presetKey) or nil
       local plan
-      if fine then
-        plan=feedbackPlan(before,input,output,R.state.activeTarget,planningYield)
+      if cached and cached.travel>0 then
+        plan=cached; fine=false; R.state.startupPreset='Using saved no-load preset'
+      elseif fine then
+        plan=feedbackPlan(before,input,output,R.state.activeTarget,planningYield,true)
         plan.positions={}; plan.degrees={}
         for i=1,3 do
           plan.positions[i]=math.max(0,math.min(1,before[i].position+plan[i]/s.travelDegrees))
@@ -168,13 +180,13 @@ function M.new(R)
       else
         plan=P.initial(s,before,input,attempt>1 and output or nil,R.state.activeTarget,planningYield)
       end
-      assert(fine or attempt>1 or plan.err<=s.fallbackVolts,('Startup target unreachable: predicted %.2f V, target %.2f V'):format(plan.predicted,R.state.activeTarget))
+      assert(cached or fine or attempt>1 or plan.err<=s.fallbackVolts,('Startup target unreachable: predicted %.2f V, target %.2f V'):format(plan.predicted,R.state.activeTarget))
       assert(plan.travel>0 and (attempt==1 or plan.err<err-.001),'Startup voltage cannot improve with measured corrections; check gauges, settling delay and ratios')
       guard(false)
       local checked=U.stationaryBanks(s); U.aligned(s,checked)
       for i=1,3 do assert(checked[i].position==before[i].position,'Variac position changed during planning: stage '..i) end
       R.state.startupPlan={positions=plan.positions,degrees=plan.degrees,predicted=plan.predicted,target=R.state.activeTarget,attempt=attempt}
-      local measurement={attempt=attempt,mode=fine and 'fine' or 'coarse',input=input,outputBefore=output,predicted=plan.predicted,target=R.state.activeTarget,banks={}}
+      local measurement={attempt=attempt,mode=plan==cached and 'cached' or fine and 'fine' or 'coarse',input=input,outputBefore=output,predicted=plan.predicted,target=R.state.activeTarget,banks={}}
       for i=1,3 do
         measurement.banks[i]={beforeDegrees=before[i].position*s.travelDegrees,commandDegrees=plan[i],targetDegrees=plan.degrees[i]}
       end
@@ -213,6 +225,7 @@ function M.new(R)
     error(('Startup voltage verification failed after 12 calculated plans: measured %.2f V, target %.2f V, input %.2f V; output history [%s]. Check input stability, settling delay, gauges and transformer ratios.'):format(output,R.state.activeTarget,input,table.concat(history,', ')))
   end
   local function operate()
+    previousLive=nil
     R.state.startupMeasurements=nil; R.state.startupPlan=nil
     R.state.phase='homing'; guard(true)
     for i=1,3 do
@@ -226,6 +239,16 @@ function M.new(R)
     R.state.activeTarget=R.state.target
     request('input'); R.state.phase='tuning'
     initialTune()
+    -- Learn only with both output contacts open, never from loaded regulation.
+    guard(false)
+    assert(not U.device(s.plusBreaker).isClosed() and not U.device(s.minusBreaker).isClosed(),'Output must be isolated when saving no-load preset')
+    local banks=U.stationaryBanks(s); U.aligned(s,banks)
+    local input,output=U.voltage(s.inputGauge),U.voltage(s.outputGauge)
+    if math.abs(output-R.state.activeTarget)<=s.fallbackVolts then
+      local positions={}; for i,bank in ipairs(banks) do positions[i]=bank.position end
+      local saved,why=pcall(U.write,presetPath,{schema=1,key=presetKey,target=R.state.activeTarget,input=input,output=output,positions=positions})
+      R.state.startupPreset=saved and 'No-load preset saved' or 'Could not save preset: '..tostring(why)
+    end
     request('output'); R.state.phase='live'; R.state.startupPlan=nil
     local last=R.now()
     while true do
