@@ -19,6 +19,9 @@ function M.run(R)
       screen=R.modules.ui.new(proxy,colors)
     else width,height=target.getSize() end
   end
+  local maintenanceQueue
+  local loaded,history=pcall(U.read,'/config/maintenance-log.json')
+  local maintenanceLogs=loaded and type(history)=='table' and type(history.entries)=='table' and history.entries or {}
   local cache={phase=R.role,config=s,maintenance={},stages={},inputBreakers={},breakers={},voltages={},sourceMeters={},events=R.events}
   for _,k in ipairs({'input','output','source','preStepUp'}) do cache.voltages[k]={} end
   cache.sourceMeters.current={}; cache.sourceMeters.power={}
@@ -83,17 +86,23 @@ function M.run(R)
     if a.kind=='emergency' or a.kind=='maintenance' or a.kind=='stop' then
       R.trip(a.kind=='emergency' and 'emergency_stop' or 'operator_stop','Operator requested '..a.kind)
       if a.kind=='stop' then error('STOP',0) end
+    elseif a.kind=='maintenance_test' then
+      assert(R.role=='master' and not R.maintenanceBusy,'Maintenance test unavailable')
+      assert(not R.state.updateApplying and not R.rebootRequested,'Update activation in progress')
+      R.maintenanceBusy=true; maintenanceQueue=a.test; R.state.maintenanceMessage='Preparing '..a.test
     elseif a.kind=='update_check' then
       R.updater.requestCheck()
     elseif a.kind=='update_apply' then
-      R.updater.approve(a.version)
+      assert(not R.maintenanceBusy,'Wait for maintenance test to finish'); R.updater.approve(a.version)
     elseif a.kind=='update_later' then
       R.updater.defer(a.version)
     elseif a.kind=='resume' then
+      assert(not R.maintenanceBusy,'Wait for maintenance test to finish')
       if R.role=='master' then R.send('protection','start',{})
       elseif R.role=='protection' then R.commands[#R.commands+1]={kind='start',data={}}
       else error('Request start from the master or protection screen') end
     elseif a.kind=='setting' then
+      assert(not R.maintenanceBusy,'Wait for maintenance test to finish')
       assert(R.role=='master','Configuration belongs to the UI master')
       local old=s[a.key]; assert(old~=nil,'Unknown setting'); local v=a.value
       if type(old)=='number' then v=tonumber(v); assert(U.finite(v),'Enter a number')
@@ -127,6 +136,8 @@ function M.run(R)
           selectOutput()
           cache.message=R.state.message or R.state.updateMessage or ''; cache.events=R.events
           cache.fault,cache.tripPending=faultStatus()
+          cache.maintenanceCanRun=R.role=='master' and cache.maintenance.active and cache.maintenance.verified and cache.maintenance.drivesIdle
+          cache.maintenanceBusy=R.maintenanceBusy; cache.maintenanceMessage=R.state.maintenanceMessage; cache.maintenanceLogs=maintenanceLogs
           cache.updateReady=R.state.updateReady; cache.updateDeferred=R.state.updateDeferred
           cache.updateApplying=R.state.updateApplying; cache.updateCanApprove=R.role=='master'
           cache.updateChecking=R.state.updateChecking; cache.updateMessage=R.state.updateMessage
@@ -156,6 +167,53 @@ function M.run(R)
       os.queueEvent('distributed_ui'); sleep(1)
     end
   end
-  parallel.waitForAny(input,sample,render)
+  local function maintenanceWorker()
+    while true do
+      if maintenanceQueue then
+        local kind=maintenanceQueue; maintenanceQueue=nil
+        local report; local moving=kind=='bank_c' or kind=='calibrate'
+        local ok,why=pcall(function()
+          local p,r=R.fresh('protection'),R.fresh('regulation')
+          assert(p and r and p.latched and r.latched and U.isolated(s) and U.idle(s),'Tests require both workers stopped, open breakers and idle drives')
+          if kind=='gauges' then report=snapshot(); report.events=nil; report.config=nil; return end
+          if kind=='alignment' then report=U.stationaryBanks(s); U.aligned(s,report); return end
+          assert(moving,'Unknown maintenance test')
+          assert(kind=='calibrate' or s.preStepUpGauge~='','Configure Voltage before exit transformer first')
+          R.state.diagnosticRequest=R.token()
+          sleep(.5)
+          R.send('protection','diagnose',{id=R.state.diagnosticRequest,test=kind,gauge=s.preStepUpGauge})
+          local started=R.now(); local deadline=started+(s.chargeTimeout+5*s.moveTimeout+120)*1000
+          while R.now()<deadline do
+            local peer=R.fresh('regulation')
+            assert(peer and R.fresh('protection'),'Maintenance worker communication lost')
+            if peer.diagnosticReport and peer.diagnosticReport.id==R.state.diagnosticRequest then
+              report=U.copy(peer.diagnosticReport)
+              R.state.maintenanceMessage=kind..': '..tostring(peer.phase)
+              if report.complete and peer.latched then return end
+              assert(not peer.latched or (report.finishing and not peer.fault),peer.fault or 'Test stopped')
+            elseif peer.diagnostic and peer.diagnostic.id==R.state.diagnosticRequest then
+              R.state.maintenanceMessage=kind..': '..tostring(peer.phase)
+              assert(not peer.latched,peer.fault or 'Test stopped')
+            else assert(R.now()-started<15000,'Test not started: '..tostring(R.state.message)) end
+            sleep(.1)
+          end
+          error('Maintenance test timed out')
+        end)
+        if moving then R.trip(ok and 'operator_stop' or 'diagnostic_aborted',ok and 'Maintenance test complete' or 'Maintenance test aborted: '..tostring(why)) end
+        local entry={at=R.now(),kind=kind,ok=ok,reason=ok and 'Completed; transformer remains isolated' or tostring(why),report=report}
+        maintenanceLogs[#maintenanceLogs+1]=entry
+        while #maintenanceLogs>8 do table.remove(maintenanceLogs,1) end
+        local saved,saveError=pcall(function()
+          if report then U.write('/config/transformer-diagnostic.json',report) end
+          U.write('/config/maintenance-log.json',{schema=1,entries=maintenanceLogs})
+        end)
+        R.state.maintenanceMessage=kind..': '..(ok and 'PASS' or 'FAIL')..(saved and '' or ' (log failed: '..tostring(saveError)..')')
+        R.maintenanceBusy=false; dirty=true
+      end
+      sleep(.1)
+    end
+  end
+  parallel.waitForAny(input,sample,render,maintenanceWorker)
+
 end
 return M

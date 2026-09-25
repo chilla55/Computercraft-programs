@@ -15,7 +15,7 @@ local function world(restore,thermalFault,options)
   local cfg=U.copy(cfg); local settings=cfg.settings
   if options.multiInput then settings.inputBreakers={'input','input2'} end
   if options.ignoreSmallMoves then settings.positionToleranceDegrees=2 end
-  local W={time=0,nodes={},contacts={input=false,plus=false,minus=false},positions={a1=.8,a2=.5,b1=.9,c1=.98},temperature={},motion={},moves={},closes={},drop={}}
+  local W={registrations={},time=0,nodes={},contacts={input=false,plus=false,minus=false},positions={a1=.8,a2=.5,b1=.9,c1=.98},temperature={},motion={},moves={},closes={},drop={}}
   if options.multiInput then W.contacts.input2=false end
   if options.lowStart then for name in pairs(W.positions) do W.positions[name]=.05 end end
   local function powered() for _,name in ipairs(settings.inputBreakers) do if not W.contacts[name] then return false end end; return true end
@@ -63,6 +63,7 @@ local function world(restore,thermalFault,options)
         local timer=env.os.startTimer(timeout)
         while true do local e={env.os.pullEvent()}; if e[1]=='rednet_message' and e[4]==protocol then return e[2],e[3],e[4] end; if e[1]=='timer' and e[2]==timer then return nil end end
       end}
+    env.rednet.broadcast=function(message,protocol) W.registrations[#W.registrations+1]={sender=N.id,message=U.copy(message),protocol=protocol} end
     local function native() env.sleep(options.nativeDelay or .001) end
     local devices={back={isWireless=function() return true end}}
     for name in pairs(W.contacts) do
@@ -94,6 +95,7 @@ local function world(restore,thermalFault,options)
       return powered() and (W.inputVoltage or 1500) or 0
     end}
     devices.vout={voltage=function() native(); local value=powered() and 3750*(options.voltageScale or 1)*(W.loadScale or 1) or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; if options.transientInBand and role=='regulation' and N.R.state.phase=='tuning' and W.maxStartupAttempt==1 and not W.transientUsed then W.transientUsed=true; return settings.target end; if options.oscillating then value=value*((W.maxStartupAttempt or 0)%2==0 and .97 or 1.03) end; return options.voltageExponent and 3750*(value/3750)^options.voltageExponent or value end}
+    devices.vpre={voltage=function() return devices.vout.voltage()/2.5 end}
     env.peripheral={wrap=function(name) return devices[name] end}; env.print=function() end
     local function mod(name) return assert(loadfile(base..name..'.lua','t',env))() end
     local modules={common=mod('common'),thermal=mod('thermal_protection'),planner=mod('planner'),hash=mod('sha256'),updater=mod('updater')}
@@ -126,6 +128,38 @@ local function world(restore,thermalFault,options)
   end
   return W
 end
+local diagnostic=world(nil,nil,{lowStart=true})
+diagnostic.untilTrue(function() return diagnostic.nodes[3].R.fresh('regulation')~=nil end,3)
+diagnostic.nodes[1].R.state.diagnosticRequest='test-c'
+diagnostic.untilTrue(function() return false end,.5)
+diagnostic.command('diagnose',{id='test-c',gauge='vpre'})
+check(diagnostic.untilTrue(function() local r=diagnostic.nodes[2].R.state.diagnosticReport; return r and r.complete end,60),'C-only diagnostic did not complete')
+local report=diagnostic.nodes[2].R.state.diagnosticReport
+check(#report.samples==15,'diagnostic sample count wrong')
+check(not diagnostic.contacts.input and not diagnostic.contacts.plus and not diagnostic.contacts.minus,'diagnostic left energized contacts')
+for _,move in ipairs(diagnostic.moves) do check(move.stage==3,'diagnostic moved A or B') end
+for _,close in ipairs(diagnostic.closes) do check(close.name=='input','diagnostic closed an output') end
+check(report.samples[6].preExit<report.samples[1].preExit,'C lowering was not captured')
+check(math.abs(report.samples[11].output-report.samples[1].output)<.01,'C restoration was not captured')
+check(not diagnostic.nodes[2].files['/config/distributed-startup.json'],'diagnostic wrote no-load preset')
+for _,failure in ipairs({'temperature','master'}) do
+ local abort=world(nil,nil,{lowStart=true})
+ abort.untilTrue(function() return abort.nodes[3].R.fresh('regulation')~=nil end,3)
+ abort.nodes[1].R.state.diagnosticRequest='abort-c'; abort.untilTrue(function() return false end,.5)
+ abort.command('diagnose',{id='abort-c',gauge='vpre'})
+ check(abort.untilTrue(function() return abort.contacts.input end,20),'diagnostic did not energize input')
+ if failure=='temperature' then abort.temperature.c1=140 else abort.drop.master=true end
+ check(abort.untilTrue(function() return abort.nodes[3].R.state.latched and not abort.contacts.input end,4),'diagnostic failed to abort on '..failure)
+ check(not abort.contacts.plus and not abort.contacts.minus,'aborted diagnostic connected output')
+end
+local calibration=world(nil,nil,{lowStart=true})
+calibration.untilTrue(function() return calibration.nodes[3].R.fresh('regulation')~=nil end,3)
+calibration.nodes[1].R.state.diagnosticRequest='calibration'; calibration.untilTrue(function() return false end,.5)
+calibration.command('diagnose',{id='calibration',test='calibrate'})
+check(calibration.untilTrue(function() local r=calibration.nodes[2].R.state.diagnosticReport; return r and r.complete end,60),'maintenance no-load calibration failed')
+check(calibration.nodes[2].files['/config/distributed-startup.json']~=nil,'maintenance calibration did not save preset')
+for _,close in ipairs(calibration.closes) do check(close.name=='input','calibration connected the load') end
+check(not calibration.contacts.input and not calibration.nodes[2].R.state.runRequested and not calibration.nodes[3].R.state.runRequested,'calibration left run intent or input energized')
 local W=world()
 check(W.untilTrue(function() return W.nodes[3].R.fresh('regulation')~=nil end,3),'discovery failed')
 W.command('start')
@@ -134,6 +168,10 @@ if not live then
   for _,N in ipairs(W.nodes) do print(N.role,N.R.state.phase,N.R.state.message); for _,e in ipairs(N.R.events) do print(e.code,e.reason) end end
 end
 check(live,'did not reach live operation')
+check(#W.registrations>0,'master did not announce to plant registry')
+for _,registration in ipairs(W.registrations) do
+ check(registration.sender==1 and registration.protocol=='powerplant.registry.v1' and registration.message.kind=='transformer_register','invalid plant registration')
+end
 check(W.contacts.input and W.contacts.plus and W.contacts.minus,'missing closed contacts')
 local homed=false; for _,m in ipairs(W.moves) do if m.degrees==318 then homed=true; check(m.isolated,'homing energized') end end
 check(homed,'mismatched bank did not home')

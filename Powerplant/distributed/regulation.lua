@@ -224,6 +224,53 @@ function M.new(R)
     for _,v in ipairs(measurements) do history[#history+1]=('%.2f'):format(v.output) end
     error(('Startup voltage verification failed after 12 calculated plans: measured %.2f V, target %.2f V, input %.2f V; output history [%s]. Check input stability, settling delay, gauges and transformer ratios.'):format(output,R.state.activeTarget,input,table.concat(history,', ')))
   end
+  local function diagnose()
+    local test=R.state.diagnostic
+    local report={schema=1,kind='bank_c',id=test.id,release=U.release,startedAt=R.now(),config=U.copy(s),preExitGauge=test.gauge,samples={}}
+    R.state.diagnosticReport=report
+    R.state.phase='diagnostic_isolated'; guard(true)
+    local initial=U.stationaryBanks(s); U.aligned(s,initial)
+    direction(3) -- Discover only C's drive direction with every breaker open.
+    local current=U.positions(s)[3].position
+    local restore=math.floor((initial[3].position-current)*s.travelDegrees+.5)
+    if restore~=0 then move(3,math.abs(restore),(restore>0 and 1 or -1)*directions[3],true) end
+    local baseline=U.stationaryBanks(s); U.aligned(s,baseline)
+    assert(math.abs(baseline[3].position-initial[3].position)*s.travelDegrees<.02,'Diagnostic direction probe did not restore C')
+    local distance=math.min(5,math.floor(baseline[3].position*s.travelDegrees))
+    assert(distance>=1,'Bank C is too close to minimum for a downward test')
+    R.state.activeTarget=R.state.target
+    request('input')
+    local function sample(label)
+      R.state.phase='diagnostic_'..label
+      pause(math.max(s.settleSeconds or .2,.5),false)
+      for n=1,5 do
+        guard(false)
+        assert(not U.device(s.plusBreaker).isClosed() and not U.device(s.minusBreaker).isClosed(),'Diagnostic output must remain isolated')
+        local banks=U.stationaryBanks(s); U.aligned(s,banks)
+        for i=1,2 do
+          for j,member in ipairs(banks[i].members) do assert(member.position==baseline[i].members[j].position,'Bank A/B moved during C-only diagnostic') end
+        end
+        local item={label=label,at=R.now(),banks=banks,input=U.voltage(s.inputGauge),preExit=U.voltage(test.gauge),output=U.voltage(s.outputGauge)}
+        if s.sourceGauge~='' then item.source=U.voltage(s.sourceGauge) end
+        local peer=assert(R.fresh('protection')); item.temperatures=U.copy(peer.temperatures or {})
+        report.samples[#report.samples+1]=item
+        pause(.25,false)
+      end
+    end
+    sample('baseline')
+    R.state.phase='diagnostic_moving'; move(3,distance,-directions[3],false)
+    sample('lowered')
+    R.state.phase='diagnostic_moving'; move(3,distance,directions[3],false)
+    sample('restored')
+    local final=U.stationaryBanks(s); U.aligned(s,final)
+    assert(math.abs(final[3].position-baseline[3].position)*s.travelDegrees<.02,'C did not return to diagnostic baseline')
+    guard(false); assert(not R.state.latched,'Diagnostic interrupted by trip')
+    report.finishing=true
+    R.trip('operator_stop','Bank C diagnostic complete; all breakers opened')
+    assert(R.state.isolationVerified,'Diagnostic could not verify open breakers')
+    report.complete=true; report.finishedAt=R.now()
+    U.write('/config/transformer-diagnostic.json',report)
+  end
   local function operate()
     previousLive=nil
     R.state.startupMeasurements=nil; R.state.startupPlan=nil
@@ -249,6 +296,18 @@ function M.new(R)
       local saved,why=pcall(U.write,presetPath,{schema=1,key=presetKey,target=R.state.activeTarget,input=input,output=output,positions=positions})
       R.state.startupPreset=saved and 'No-load preset saved' or 'Could not save preset: '..tostring(why)
     end
+    if R.state.diagnostic then
+      assert(R.state.startupPreset=='No-load preset saved','Calibration could not save the no-load preset')
+      local report={schema=1,kind='calibrate',id=R.state.diagnostic.id,release=U.release,measurements=U.copy(R.state.startupMeasurements),input=input,output=output,positions={},finishing=true}
+      for i,bank in ipairs(banks) do report.positions[i]=bank.position end
+      R.state.diagnosticReport=report
+      guard(false); assert(not R.state.latched,'Calibration interrupted')
+      R.trip('operator_stop','No-load calibration complete; all breakers opened')
+      assert(R.state.isolationVerified,'Calibration could not verify isolation')
+      report.complete=true; report.finishedAt=R.now()
+      U.write('/config/transformer-diagnostic.json',report)
+      return
+    end
     request('output'); R.state.phase='live'; R.state.startupPlan=nil
     local last=R.now()
     while true do
@@ -266,7 +325,7 @@ function M.new(R)
       local peer=R.fresh('protection')
       if R.state.latched or not R.state.cycle or not peer or peer.latched or peer.cycle~=R.state.cycle then sleep(.1)
       else
-        local ok,why=pcall(operate)
+        local ok,why=pcall(R.state.diagnostic and R.state.diagnostic.kind~='calibrate' and diagnose or operate)
         if not ok and not R.state.latched then R.trip(tostring(why):find('unknown_opening',1,true) and 'unknown_opening' or tostring(why):find('bank_misaligned',1,true) and 'bank_misaligned' or tostring(why):find('variac_stuck',1,true) and 'variac_stuck' or 'regulation_fault',tostring(why),R.state.phase~='live' and R.state.startupMeasurements and {startupMeasurements=R.state.startupMeasurements} or nil) end
       end
     end

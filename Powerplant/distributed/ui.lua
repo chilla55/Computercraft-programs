@@ -3,7 +3,7 @@ local M={}
 function M.new(screen,c,clock)
   clock=clock or os.clock
   local tab,offset,editing='Diagram',0,nil
-  local tabs={'Diagram','Variacs','Gauges','Settings','Incidents','Updates'}
+  local tabs={'Diagram','Variacs','Gauges','Settings','Incidents','Updates','Maintenance'}
   local hits={}
   local frame,lastRows={},{}
   local lastWidth,lastHeight
@@ -59,7 +59,7 @@ function M.new(screen,c,clock)
     else
       put(1,1,'TRANSFORMER '..string.upper(data.phase or '?'),c.cyan,nil,w-14)
       button(math.max(1,w-13),1,' EMERGENCY STOP',{kind='emergency'},c.red)
-      if w<56 then
+      if w<78 then
         button(1,2,'<',{kind='page',delta=-1}); put(3,2,tab,c.cyan,nil,w-4)
         button(w,2,'>',{kind='page',delta=1})
       else
@@ -119,6 +119,19 @@ function M.new(screen,c,clock)
         local sample=data.sourceMeters[key]; if compact then row('Source '..key); row(fmt(sample.amps or sample.watts,key=='current' and ' A' or ' W')) else row('Source '..key..': '..fmt(sample.amps or sample.watts,key=='current' and ' A' or ' W')) end
         row(' '..tostring(sample.peripheral or 'unassigned')..(sample.available and '' or ' [unavailable]'))
       end
+    elseif tab=='Maintenance' then
+      row(data.maintenanceMessage or 'Tests and calibration')
+      if data.maintenanceCanRun and not data.maintenanceBusy then
+        for _,test in ipairs({{'C voltage test','bank_c'},{'No-load calibration','calibrate'},{'Gauge snapshot','gauges'},{'Check alignment','alignment'}}) do
+          row(test[1]); actions[#rows]={kind='maintenance_test',test=test[2]}
+        end
+      else row(data.maintenanceBusy and 'Test running; E-STOP aborts' or 'Requires isolated maintenance on master') end
+      row('Recent maintenance logs:')
+      for i=#(data.maintenanceLogs or {}),1,-1 do
+        local log=data.maintenanceLogs[i]
+        row(log.kind..': '..(log.ok and 'PASS' or 'FAIL')); row(log.reason or tostring(log.at))
+      end
+      row('/config/maintenance-log.json')
     elseif tab=='Updates' then
       local function version(v) return v and v:gsub('^distributed%-','') or '--' end
       if data.updateCanApprove and not data.updateChecking and not data.updateApplying then
@@ -236,6 +249,7 @@ function M.new(screen,c,clock)
           tab=tabs[(index-1+action.delta)%#tabs+1]; offset=0; editing=nil
         elseif action.kind=='scroll' then offset=math.max(0,offset+action.delta)
         elseif action.kind=='tab' then tab=action.name; offset=0; editing=nil
+        elseif action.kind=='maintenance' then tab='Maintenance'; offset=0; editing=nil; return action
         elseif action.kind=='edit' then editing={key=action.key,text=value(api.config[action.key]),replace=true}
         else return action end
         return

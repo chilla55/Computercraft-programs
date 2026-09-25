@@ -23,6 +23,7 @@ for _,height in ipairs({19,29,40}) do
  check(ui.event('mouse_click',1,1,2).kind=='emergency','portrait emergency')
  check(ui.event('mouse_click',1,1,h-5).kind=='maintenance','portrait maintenance')
  check(ui.event('mouse_click',1,1,h-4).kind=='resume','portrait reset')
+ ui=UI.new(screen,c); ui.draw(d)
  for i=1,3 do ui.event('mouse_click',1,w,3); ui.draw(d) end
  ui.event('mouse_click',1,1,5); check(ui.editing().key=='entryRatio','portrait setting selection')
  ui.event('char','6'); check(ui.event('mouse_click',1,1,2).kind=='emergency','emergency while editing')
@@ -61,7 +62,7 @@ for _,width in ipairs({15,51}) do
  w=width; h=29; local updates=UI.new(screen,c,function() return 0 end)
  d.updateCanApprove=true; d.updateChecking=nil; d.updateApplying=nil; d.runningVersion='distributed-1.1.9'; d.autoUpdate=false
  updates.draw(d)
- updates.event('mouse_click',1,1,width<45 and 3 or 2); updates.draw(d) -- wrap left to Updates
+ for _=1,2 do updates.event('mouse_click',1,1,width<45 and 3 or 2); updates.draw(d) end -- wrap left through Maintenance to Updates
  local y=width<45 and 5 or 3
  check(updates.event('mouse_click',1,2,y).kind=='update_check','Updates Check now missing')
  check(lines[y+1]:find('1.1.9',1,true),'running version absent from Updates')
@@ -69,6 +70,23 @@ for _,width in ipairs({15,51}) do
  check(updates.event('mouse_click',1,2,y)==nil,'busy check button still enabled')
  d.updateChecking=nil; d.updateCanApprove=false; updates.draw(d)
  check(updates.event('mouse_click',1,2,y)==nil,'worker screen allowed update check')
+end
+for _,width in ipairs({15,36,57,78}) do
+ w=width; h=29; local menu=UI.new(screen,c)
+ d.maintenanceCanRun=true; d.maintenanceBusy=false; d.maintenanceLogs={}
+ menu.draw(d)
+ local y=width<45 and h-5 or h-1
+ -- Use the visible maintenance button to enter its menu.
+ if width<45 then menu.event('mouse_click',1,1,y)
+ elseif width<78 then menu.event('mouse_click',1,1,2)
+ else menu.event('mouse_click',1,65,2) end
+ menu.draw(d)
+ local actionRow=width<45 and 6 or 4
+ local action=menu.event('mouse_click',1,1,actionRow)
+ check(action and action.kind=='maintenance_test' and action.test=='bank_c','maintenance C test missing')
+ d.maintenanceBusy=true; menu.draw(d)
+ check(menu.event('mouse_click',1,1,actionRow)==nil,'busy maintenance allowed another test')
+ d.maintenanceBusy=false
 end
 w=15; h=29
 -- The renderer may yield in a monitor write without blocking touch input.

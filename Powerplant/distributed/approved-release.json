@@ -1,11 +1,11 @@
 {
   "files": {
     "app.lua": {
-      "sha256": "2b2b1bfae5be2eb82a22bc8a9556ebd84bb20f0fe3d9c2e00c3ce5ba65795b17",
-      "size": 11788
+      "sha256": "fc0dfbb16c9eed566f3926a3c115c330ce082f3c3860c7fef337988161d37a39",
+      "size": 14637
     },
     "common.lua": {
-      "sha256": "116277a11766bda5291646e0353e044a59a1bf932bf0342779f7ecc139452bdc",
+      "sha256": "85bbb85f2ab472509caf9afdec64c9d96990a777f069dd62a50c71e96cb57dd0",
       "size": 14817
     },
     "discovery.lua": {
@@ -13,24 +13,24 @@
       "size": 1473
     },
     "interface.lua": {
-      "sha256": "fbcd94d8fce51d41803cdeee203f9f20f2976f83019fabb2d8d055782e73a016",
-      "size": 9125
+      "sha256": "73fe5e93c9cb0667d181060cea7d83d9526de67d11bcabca821cb760f8c11495",
+      "size": 13159
     },
     "planner.lua": {
       "sha256": "415251c35de2e02b45743396a8120fa1484439b87bab10683a53c0a3a9899d7d",
       "size": 4830
     },
     "protection.lua": {
-      "sha256": "cc03170639d6b6cb58101eacce847fd4f20bc3f10835ce60c0bb51a5120f8f86",
-      "size": 11049
+      "sha256": "ffa6d8a68a11e2ae48d06513513c38ccc65d3499fd345d68db6ab00f782695d1",
+      "size": 11868
     },
     "regulation.lua": {
-      "sha256": "9abeb1f6444adcae9d91126989eb27d42f783a783cb8f49fa41208cc9d8d0477",
-      "size": 14423
+      "sha256": "1e3c450ec23aecfb55a6e5f9df2d0419676d9fb10f0b9b21b938280325e498da",
+      "size": 18133
     },
     "runtime.lua": {
-      "sha256": "5792f0a0cb5ff3b8afd97fc6f62ebf9138a60b23da654e80341ed10b6173f833",
-      "size": 12181
+      "sha256": "f1f7d8f04e14fc6a94247eec6695ea121d53a01ae593b3673fabc0cf8d533f55",
+      "size": 13808
     },
     "sha256.lua": {
       "sha256": "d85c2a76d06b2ee814e26780347245f5a1780fe3bd7569663692e6e7433149e2",
@@ -45,15 +45,15 @@
       "size": 2631
     },
     "ui.lua": {
-      "sha256": "7323888714577e49215ad01c5f0fb3037fd2b894bf862e4b6b41427f4030da7f",
-      "size": 14074
+      "sha256": "aeffeed2d9c6c0a34c2bbdf79d50c85653d931bc8947b7a9fc10dd0ac81c9c0f",
+      "size": 15001
     },
     "updater.lua": {
       "sha256": "aa22dbc375f16eb5d202226560aabd50ce602395cd926ebdd925b95c9869a256",
       "size": 14695
     }
   },
-  "ref": "distributed-1.1.15",
+  "ref": "distributed-1.1.16",
   "schema": 1,
-  "version": "distributed-1.1.15"
+  "version": "distributed-1.1.16"
 }

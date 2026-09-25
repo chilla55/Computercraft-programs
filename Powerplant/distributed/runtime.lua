@@ -92,6 +92,24 @@ function M.new(config,node,modules,root)
       R.state.tripPending=nil; R.state.fault='Unknown breaker opening (no controller reported a trip)'; R.persist()
     end
   end
+  local nextRegistration=0
+  function R.registerPlant()
+    if R.role~='master' or R.now()<nextRegistration then return end
+    nextRegistration=R.now()+30000
+    -- Registry announcements are transport-independent and read-only. Failure
+    -- of the optional plant uplink must never interrupt local heartbeats.
+    local ok,why=pcall(function()
+      if node.uplinkModem and not rednet.isOpen(node.uplinkModem) then rednet.open(node.uplinkModem) end
+      local protection,regulation=R.fresh('protection'),R.fresh('regulation')
+      rednet.broadcast({schema=1,kind='transformer_register',computerId=os.getComputerID(),
+        cluster=config.cluster or 'transformer',release=U.release,sentAt=R.now(),leaseSeconds=90,
+        capabilities={autonomous=true,localMaintenance=true,remoteControl=false},
+        status={phase=protection and protection.phase or 'protection offline',
+          inputVoltage=protection and protection.inputVoltage,outputVoltage=protection and protection.outputVoltage,
+          target=protection and protection.target,activeTarget=regulation and regulation.activeTarget}},'powerplant.registry.v1')
+    end)
+    R.state.plantRegistryError=not ok and tostring(why) or nil
+  end
   function R.heartbeat()
     while true do
       local ok=pcall(function()
@@ -103,6 +121,7 @@ function M.new(config,node,modules,root)
         local state={}; for key,value in pairs(R.state) do if key~='events' then state[key]=U.copy(value) end end; state.events={}
         for i=math.max(1,#R.events-7),#R.events do state.events[#state.events+1]=R.events[i] end
         R.publish('heartbeat',state)
+        R.registerPlant()
       end)
       if not ok and R.role~='master' and not R.state.latched then R.trip('modem_failure','Wired modem unavailable') end
       sleep(.25)
@@ -158,9 +177,10 @@ function M.new(config,node,modules,root)
             if m.data.cycle~=R.state.cycle then
               assert(U.isolated(config.settings) and U.idle(config.settings),'Cannot arm while energized/moving')
               R.state.cycle=m.data.cycle; R.state.target=m.data.target; R.state.activeTarget=m.data.target
-              R.clearFaults(); R.state.phase='starting'; R.persist()
+              R.state.diagnostic=m.data.diagnostic; R.state.diagnosticReport=nil
+              R.clearFaults(); if R.state.diagnostic then R.state.runRequested=false end; R.state.phase='starting'; R.persist()
             end
-          elseif (m.kind=='start' or m.kind=='target') and m.role=='master' and R.role=='protection' then
+          elseif (m.kind=='start' or m.kind=='diagnose' or m.kind=='target') and m.role=='master' and R.role=='protection' then
             R.commands[#R.commands+1]=m
           elseif m.kind=='close' and m.role=='regulation' and R.role=='protection' then
             if #R.commands<8 then R.commands[#R.commands+1]=m end
@@ -178,6 +198,10 @@ function M.new(config,node,modules,root)
   function R.watchdog()
     while true do
       if R.role~='master' and not R.state.latched then
+        if R.state.diagnostic then
+          local master=R.fresh('master')
+          if not master or master.diagnosticRequest~=R.state.diagnostic.id then R.trip('diagnostic_aborted','Diagnostic master unavailable') end
+        end
         local other=R.role=='regulation' and 'protection' or 'regulation'
         -- Arming waits for the counterpart while contacts are still open.
         if not R.fresh(other) and not U.isolated(config.settings) then R.trip('worker_timeout',other..' communication lost') end

@@ -25,7 +25,7 @@ wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powe
 install-transformer.lua
 ```
 
-To select an exact release, use `install-transformer.lua transformer distributed-1.1.15` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
+To select an exact release, use `install-transformer.lua transformer distributed-1.1.16` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
 
 The default installation folder is `transformer/`, which holds the original fallback and stable launcher and verifies every file against the GitHub release manifest. It does not replace an existing installation or alter startup scripts. HTTP must be enabled and GitHub accessible. Alternatively, copy all top-level `.lua` files from this directory into `transformer/` using a disk.
 
@@ -138,3 +138,23 @@ lua Powerplant/distributed/tests/planner.lua
 The startup planner tests verify reachable whole-degree destinations, measured-voltage corrections, unreachable targets, and the supplied 316-point single-variac calibration, and balanced stage positions against an exhaustive small-range search. Integration tests also cover nonlinear feedback requiring more than three corrections, nonconverging feedback, transient in-band readings, and an input opening between the contact and voltage reads. The integration fixture runs all three roles in separate Lua environments, with shared simulated peripherals, yielding native calls and CC-style event routing. It covers isolated bank homing, protection-only closure, UI loss, a hot follower, reset/restart, unknown contact opening and heartbeat loss even while hello messages still arrive, automatic restart from persisted running state without the UI, refusal to automatically clear stopped or thermal-tripped states, shafts moving despite an idle gearbox, automatic isolated realignment, and jammed recovery without repeated retries, concurrent full-travel startup, bounded correction plans and refusal to connect an unverified output, and both immediate 140 C trips and timed overheating trips during a long startup move. It does not model Minecraft's electrical or thermal physics.
 
 To publish the next release, increment `release` in `common.lua`, regenerate `approved-release.json` with `python3 Powerplant/distributed/tools/build_release.py`, test the exact files, commit, and create the matching `distributed-X.Y.Z` tag at that commit. Push the tag before publishing the updated manifest on `main`. Never rewrite an existing release tag.
+
+
+### Maintenance tests and logs
+
+The standard local display is a **3-wide by 2-high monitor** at text scale 0.5. Smaller/larger monitors remain supported. Configuration can select no monitor for terminal-only/headless operation; losing the monitor falls back to the terminal and does not stop independent worker protection or regulation. The UI master broadcasts `transformer_register` on `powerplant.registry.v1` at startup and every 30 seconds, with a 90-second suggested lease, cluster name, computer ID, release, capabilities and available voltage/target status. Announcements use open rednet modems, including the configured optional wired/ender plant uplink. Plant connectivity is optional; failed registration never interrupts worker heartbeats. Discovery is available now; remote plant-master screen/control integration is not implemented yet; maintenance operations use structured commands and telemetry rather than screen pixels.
+
+Press **Maintenance** to open the maintenance menu and isolate the transformer. Once both workers are stopped, all contacts are verified open and drives are idle, the master offers:
+
+- **C voltage test:** only C is moved. A small isolated direction probe is restored first; then protection energizes the input with both output contacts locked open. The test takes five baseline samples, lowers C by up to 5 degrees, takes five samples, restores C, and takes five final samples. It records input, pre-exit, output, optional pre-entry voltage, all bank positions, and protection temperatures. It checks that A/B remain fixed and finishes isolated. A configured pre-exit gauge is required.
+- **No-load calibration:** runs the guarded startup tuning and saves its learned preset, then opens the input without connecting the load.
+- **Gauge snapshot:** saves available gauge readings, positions, temperatures and breaker status.
+- **Check alignment:** verifies stationary, exactly aligned members within every bank.
+
+Moving tests require live master communication and both workers on the same release. Protection retains exclusive breaker-close authority, thermal/current interlocks remain active, and output closure is forbidden for the entire diagnostic cycle. Emergency stop aborts the test. Tests do not automatically resume after a restart. The UI remains responsive while a test runs.
+
+The master retains the latest **eight** test results (including failures and report data) in `/config/maintenance-log.json`; the Maintenance page shows their summaries. `/config/transformer-diagnostic.json` holds the latest available report. Completed moving-test reports are also saved on the regulation computer. C-only diagnostics do not overwrite the learned no-load preset.
+
+For a terminal-run C test, enter maintenance, stop the master's UI program, leave both workers running, and run `transformer/transformer.lua diagnose`. An optional second argument supplies the pre-exit gauge name for that test only: `transformer/transformer.lua diagnose powergrid_voltage_gauge_12`. Ctrl+T opens all breakers before writing the partial report. Restart `transformer/transformer.lua run` afterward.
+
+Run `lua Powerplant/distributed/tests/maintenance.lua` for the maintenance queue and bounded-log checks.

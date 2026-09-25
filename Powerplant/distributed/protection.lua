@@ -107,6 +107,7 @@ function M.new(R)
       assert(U.device(s.plusBreaker).isClosed()==false and U.device(s.minusBreaker).isClosed()==false,'Output must be isolated')
       names=s.inputBreakers
     elseif group=='output' then
+      assert(not R.state.diagnostic,'Output closure forbidden during diagnostic')
       for _,name in ipairs(s.inputBreakers) do assert(U.device(name).isClosed(),'Input not energized') end
       local p=assert(R.fresh('regulation')); local output=U.voltage(s.outputGauge)
       assert(p.phase=='await_output' and U.finite(p.activeTarget),'Regulation not ready for output connection')
@@ -125,15 +126,26 @@ function M.new(R)
     R.state.phase=group=='input' and 'input_on' or 'connected'
   end
   local function command(m)
-    if m.kind=='start' then
+    if m.kind=='start' or m.kind=='diagnose' then
       if not R.state.latched then R.state.message='Already running.'; return end
       local generation=R.state.generation
       assert(U.isolated(s) and U.idle(s),'Reset requires verified open contacts and idle drives')
       assert(generation==R.state.generation,'A new trip superseded the start request')
       local ok,why=policy.reset(R.now()/1000); assert(ok,why); save()
       assert(generation==R.state.generation,'A new trip superseded the start request')
-      R.clearFaults(); R.state.cycle=R.token(); R.state.phase='armed'; expected={}; processed={}
-      R.persist(); R.publish('arm',{cycle=R.state.cycle,target=R.state.target})
+      local diagnostic
+      if m.kind=='diagnose' then
+        local master=R.fresh('master')
+        assert(type(m.data.id)=='string' and master and master.diagnosticRequest==m.data.id,'Diagnostic master not ready')
+        local kind=m.data.test or 'bank_c'
+        assert(kind=='bank_c' or kind=='calibrate','Unknown maintenance test')
+        assert(kind=='calibrate' or (type(m.data.gauge)=='string' and m.data.gauge~=''),'Diagnostic needs a pre-exit gauge')
+        diagnostic={id=m.data.id,gauge=m.data.gauge,kind=kind}
+      end
+      R.clearFaults(); R.state.diagnostic=diagnostic
+      if diagnostic then R.state.runRequested=false end
+      R.state.cycle=R.token(); R.state.phase='armed'; expected={}; processed={}
+      R.persist(); R.publish('arm',{cycle=R.state.cycle,target=R.state.target,diagnostic=R.state.diagnostic})
     elseif m.kind=='target' then
       local target=m.data.target
       assert(U.finite(target) and target>0 and target/(s.stepUp*.99999^3)<s.maxInputVolts,'Target outside configured range')
@@ -183,7 +195,7 @@ function M.new(R)
           else R.state.message='Alignment trip: waiting for isolated regulation worker.' end
         end
         local m=R.commands[1]
-        if m and (m.kind~='start' or thermalReady) then
+        if m and ((m.kind~='start' and m.kind~='diagnose') or thermalReady) then
           table.remove(R.commands,1)
           if m.kind=='close' then command(m)
           else
@@ -194,7 +206,7 @@ function M.new(R)
         end
         if not R.state.latched then
           local peer=R.fresh('regulation')
-          if not peer or peer.cycle~=R.state.cycle then R.publish('arm',{cycle=R.state.cycle,target=R.state.target}) end
+          if not peer or peer.cycle~=R.state.cycle then R.publish('arm',{cycle=R.state.cycle,target=R.state.target,diagnostic=R.state.diagnostic}) end
         end
       end)
       if not ok then local reason=tostring(why); R.trip(reason:find('bank_misaligned',1,true) and 'bank_misaligned' or reason:find('variac_stuck',1,true) and 'variac_stuck' or 'protection_interlock',reason) end

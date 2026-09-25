@@ -64,7 +64,7 @@ local function configure()
   local cluster=prompt('Transformer cluster name',node and node.config.cluster or 'transformer')
   D.host(cluster,role)
   local uplink,monitor
-  if role=='master' then uplink=prompt('Optional ender uplink (- for none)',node and node.uplinkModem or wireless[1] or '-'); if uplink=='-' then uplink=nil end end
+  if role=='master' then uplink=prompt('Optional plant uplink modem, wired or ender (- for none)',node and node.uplinkModem or wireless[1] or '-'); if uplink=='-' then uplink=nil end end
   if role=='master' then
     local monitors={}; for _,name in ipairs(peripheral.getNames()) do
       if peripheral.hasType(name,'monitor') then monitors[#monitors+1]=name end
@@ -168,9 +168,54 @@ if command=='trip' then
   print('All configured breakers verified open; automatic restart disabled.'); return
 end
 D.open(node.modem); D.host(node.config.cluster or 'transformer',node.role)
-assert(command==nil or command=='run','Use configure, run, trip or rollback')
+assert(command==nil or command=='run' or command=='diagnose','Use configure, run, diagnose, trip or rollback')
 local modules={common=U,thermal=module('thermal_protection'),planner=module('planner'),hash=module('sha256'),ui=module('ui'),updater=module('updater')}
 local R=module('runtime').new(node.config,node,modules,fs.getDir(launcher))
+if command=='diagnose' then
+  assert(node.role=='master','Launch diagnostics on the master')
+  local gauge=requestedRole or node.config.settings.preStepUpGauge
+  assert(gauge and gauge~='','Configure Voltage before exit transformer, or run diagnose <gauge peripheral name>')
+  U.voltage(gauge) -- Validate the extra read-only measurement before arming.
+  local report={schema=1,complete=false,samples={}}
+  local function test()
+    assert(U.isolated(node.config.settings) and U.idle(node.config.settings),'Enter maintenance before starting this test')
+    local deadline=R.now()+10000
+    repeat sleep(.1) until (R.fresh('protection') and R.fresh('regulation')) or R.now()>deadline
+    assert(R.fresh('protection') and R.fresh('regulation'),'Both updated workers must be running')
+    assert(R.fresh('protection').latched and R.fresh('regulation').latched,'Both workers must be in maintenance')
+    R.state.diagnosticRequest=R.token()
+    sleep(.5) -- Advertise the test lease before protection arms.
+    R.send('protection','diagnose',{id=R.state.diagnosticRequest,gauge=gauge})
+    print('Testing C only. Outputs remain open. Ctrl+T aborts and opens all breakers.')
+    local finish=R.now()+(node.config.settings.chargeTimeout+5*node.config.settings.moveTimeout+60)*1000
+    local seen=false; local printed=0
+    repeat
+      local peer=R.fresh('regulation')
+      if peer and peer.diagnosticReport and peer.diagnosticReport.id==R.state.diagnosticRequest then
+        seen=true; report=U.copy(peer.diagnosticReport)
+        for i=printed+1,#report.samples do
+          local v=report.samples[i]
+          print(('%s: in %.2f / before exit %.2f / out %.2f V'):format(v.label,v.input,v.preExit,v.output))
+        end
+        printed=#report.samples
+        if report.complete and peer.latched then return end
+        assert(not peer.latched or (report.finishing and not peer.fault),peer.fault or 'Diagnostic stopped')
+      end
+      assert(R.now()<finish,'Diagnostic timed out: '..tostring(R.state.message))
+      if not seen and R.now()>deadline+5000 then error('Diagnostic not started: '..tostring(R.state.message)) end
+      sleep(.1)
+    until false
+  end
+  local ok,why=pcall(function() parallel.waitForAny(test,R.receive,R.heartbeat,R.watchdog) end)
+  -- Opening must precede report writes, including termination and lost workers.
+  local stopped,stopReason=pcall(R.trip,ok and 'operator_stop' or 'diagnostic_aborted',ok and 'Diagnostic finished' or 'Diagnostic aborted: '..tostring(why))
+  if not ok then report.complete=false; report.error=tostring(why) end
+  U.write('/config/transformer-diagnostic.json',report)
+  print(ok and 'Diagnostic complete.' or tostring(why))
+  print('Report: /config/transformer-diagnostic.json')
+  if not stopped then error(stopReason,0) end
+  return
+end
 local worker
 if node.role~='master' then
   local ready,result=pcall(function() return module(node.role).new(R) end)
