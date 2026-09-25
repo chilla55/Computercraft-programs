@@ -1,5 +1,7 @@
 -- Standalone master maintenance test using normal peripherals only.
 -- Homes ONE bank to minimum and leaves it there. NEVER closes contacts.
+local VERSION='isolated-bank-3'
+print('Diagnostic version: '..VERSION)
 local stage=(... or 'C'):upper()
 assert(stage=='A' or stage=='B' or stage=='C','Usage: test-isolated-bank [A|B|C]')
 local f=assert(fs.open('/config/distributed-node.json','r'),'Missing node configuration')
@@ -13,17 +15,25 @@ local gearName=s['gear'..stage]
 local function now() return os.epoch('utc') end
 local function finite(v) return type(v)=='number' and v==v and math.abs(v)<math.huge end
 assert(finite(s.travelDegrees) and s.travelDegrees>=16,'Invalid travel range')
-local report={schema=1,kind='isolated_bank_motion',stage=stage,members=members,startedAt=now(),
+local report={schema=1,version=VERSION,kind='isolated_bank_motion',stage=stage,members=members,startedAt=now(),
  atomic=false,moves={},samples={},droppedSamples=0,completed=false,
  limitation='Sequential position samples; cannot prove equal positions within a game tick or reproduce energized circuit behavior.'}
 -- CC:Tweaked JSON rejects repeated table identities, even without cycles.
-local function copy(value)
+local function copy(value,active,path)
+ if type(value)=='number' and not finite(value) then return tostring(value) end
  if type(value)~='table' then return value end
- local result={}; for k,v in pairs(value) do result[k]=copy(v) end; return result
+ active=active or {}; path=path or '$'
+ assert(not active[value],VERSION..': circular table at '..path)
+ active[value]=true
+ local result={}
+ for k,v in pairs(value) do result[k]=copy(v,active,path..'.'..tostring(k)) end
+ active[value]=nil
+ return result
 end
 local destination='/config/isolated-bank-test.json'
 local function save()
- local encoded=textutils.serializeJSON(report)
+ local ok,encoded=pcall(function() return textutils.serializeJSON(copy(report)) end)
+ assert(ok,VERSION..': report serialization failed: '..tostring(encoded))
  local out=assert(fs.open(destination..'.tmp','w')); out.write(encoded); out.close()
  if fs.exists(destination) then fs.delete(destination) end
  fs.move(destination..'.tmp',destination)
@@ -60,11 +70,11 @@ local function snapshot(label)
  if #report.samples>128 then table.remove(report.samples,2); report.droppedSamples=report.droppedSamples+1 end
  for _,name in ipairs(members) do
   local entry={name=name,startedAt=now()}; item.members[#item.members+1]=entry
-  local p=device(name); local v=p.getStatus(); entry.status=v
+  local p=device(name); local v=p.getStatus(); entry.status=copy(v)
   assert(type(v)=='table' and finite(v.position) and v.position>=0 and v.position<=1 and finite(v.shaftSpeed),'Invalid position/speed '..name)
   item.stationary=item.stationary and v.shaftSpeed==0
   lo=math.min(lo,v.position); hi=math.max(hi,v.position)
-  local t=p.getThermalStatus(); entry.thermal=t; entry.finishedAt=now()
+  local t=p.getThermalStatus(); entry.thermal=copy(t); entry.finishedAt=now()
   assert(t and t.available==true and t.unit=='C' and finite(t.temperature),'Temperature unavailable '..name)
   assert(t.temperature<140,'Overtemperature '..name)
  end
@@ -104,6 +114,7 @@ print('Both members will be homed to minimum and left there. Ctrl+T aborts.')
 local ok,why=pcall(function()
  local initial=settled('initial',false); report.initial=copy(initial)
  for _,entry in ipairs(initial.members) do assert(entry.thermal.temperature<=125,'Cool below 125 C before test') end
+ save() -- Verify report serialization/storage before the first shaft command.
  -- Direction probe is allowed to start misaligned, but only in isolation.
  local probe=move('direction probe',3,1,false)
  local sign
@@ -152,7 +163,13 @@ end)
 local opened,openError=openAll()
 report.openVerified=opened; report.openError=not opened and openError or nil
 report.completed=ok and opened; report.error=not ok and tostring(why) or not opened and openError or nil
-report.finishedAt=now(); save()
+report.finishedAt=now()
+local saved,saveError=pcall(save)
+if not saved then
+ print(VERSION..': could not save '..destination..': '..tostring(saveError))
+ if report.error then print('Original abort: '..report.error) end
+ return
+end
 print(report.completed and 'PASS: homed and completed 16 isolated test movements.' or 'ABORTED: '..tostring(report.error))
 print('Report: '..destination)
 print('Leave in maintenance. No energized behavior was tested.')

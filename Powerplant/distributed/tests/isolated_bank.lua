@@ -3,6 +3,7 @@ local function check(v,m) assert(v,m); count=count+1 end
 local function run(options)
  options=options or {}
  local time,moves,files,report=0,{},{}
+ local sharedStatus,sharedThermal,sharedExtra={},{},{}
  local positions={a=.5,b=.6,c1=options.atMaximum and 1 or .3,c2=options.atMaximum and 1 or .8}
  local contacts={input=options.closed or false,plus=false,minus=false}; local opens={}
  local settings={inputBreakers={'input'},plusBreaker='plus',minusBreaker='minus',gearA='ga',gearB='gb',gearC='gc',variacsA={'a'},variacsB={'b'},variacsC={'c1','c2'},travelDegrees=315,moveTimeout=1,positionToleranceDegrees=1}
@@ -34,25 +35,36 @@ local function run(options)
    end
    if options.loseIsolation then contacts.input=true end
   end} end
-  return {getStatus=function() return {position=positions[name],shaftSpeed=options.stuck and 32 or 0} end,
-   getThermalStatus=function() return {available=true,unit='C',temperature=options.hot and #moves>0 and 145 or 20} end}
+  return {getStatus=function()
+   local v=options.shared and sharedStatus or {}
+   v.position=positions[name]; v.shaftSpeed=options.stuck and 32 or 0
+   if options.shared then v.extra={first=sharedExtra,second=sharedExtra} end
+   if options.cycle then v.extra=v end
+   return v
+  end, getThermalStatus=function()
+   local v=options.shared and sharedThermal or {}
+   v.available=true; v.unit='C'; v.temperature=options.hot and #moves>0 and 145 or 20
+   return v
+  end}
  end}
  assert(loadfile('Powerplant/distributed/tools/test-isolated-bank.lua','t',env))('C')
  return report,moves,contacts,opens
 end
-for _,options in ipairs({{}, {reverse=true},{atMaximum=true}}) do
+for _,options in ipairs({{}, {reverse=true},{atMaximum=true},{shared=true}}) do
  local r,m,c=run(options)
  check(r.completed and r.openVerified,'isolated test failed')
+ check(r.version=='isolated-bank-3','report lacks diagnostic version')
+ check(r.initial.members[1].status.position==(options.atMaximum and 1 or .3),'earlier sample changed after later reads')
  check(#m>=18 and #m<=19,'wrong number of homing/probe/test movements')
  check(r.final.members[1].status.position<1e-8 and r.final.aligned,'bank not left aligned at minimum')
  check(not c.input and not c.plus and not c.minus,'contacts not open')
 end
-for _,options in ipairs({{jam=true},{opposite=true},{closed=true},{missing='c2'},{loseIsolation=true},{terminate=true},{hot=true},{stuck=true}}) do
+for _,options in ipairs({{jam=true},{opposite=true},{closed=true},{missing='c2'},{loseIsolation=true},{terminate=true},{hot=true},{stuck=true},{cycle=true}}) do
  local r,m,c,opens=run(options)
  check(not r.completed and r.error,'fault did not abort')
  check(not c.input and not c.plus and not c.minus,'fault did not isolate')
  check(opens[1]=='input','fault did not prioritize source opening')
- if options.closed or options.missing or options.stuck then check(#m==0,'moved without valid precheck') end
+ if options.closed or options.missing or options.stuck or options.cycle then check(#m==0,'moved without valid precheck') end
  if options.terminate or options.hot or options.loseIsolation then check(#m==1,'movement continued after abort condition') end
 end
 print(('PASS: %d isolated bank diagnostic checks'):format(count))
