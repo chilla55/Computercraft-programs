@@ -2,6 +2,7 @@
 local M={}
 function M.new(R)
   local U,s=R.U,R.config.settings
+  local cancelledClose={} -- Internal cancellation, never a replacement trip reason.
   local policy=R.modules.thermal.new({s.variacsA,s.variacsB,s.variacsC},{graceSeconds=s.thermalGraceSeconds,maxAgeSeconds=s.thermalMaxAgeSeconds,coolSeconds=s.thermalCoolSeconds})
   local saved=U.read('distributed-thermal.json'); if saved then policy.restore(saved) end
   local lastSaved,expected,processed=nil,{},{}
@@ -96,7 +97,7 @@ function M.new(R)
   local function close(group)
     local generation=R.state.generation
     local function veto()
-      assert(not R.state.latched and generation==R.state.generation,'Trip superseded close request')
+      if R.state.latched or generation~=R.state.generation then error(cancelledClose,0) end
       local p=R.fresh('regulation')
       assert(p and p.cycle==R.state.cycle and not p.latched,'No current regulation clearance')
       assert(not policy.check(R.now()/1000),'Thermal interlock not satisfied')
@@ -209,7 +210,15 @@ function M.new(R)
           if not peer or peer.cycle~=R.state.cycle then R.publish('arm',{cycle=R.state.cycle,target=R.state.target,diagnostic=R.state.diagnostic}) end
         end
       end)
-      if not ok then local reason=tostring(why); R.trip(reason:find('bank_misaligned',1,true) and 'bank_misaligned' or reason:find('variac_stuck',1,true) and 'variac_stuck' or 'protection_interlock',reason) end
+      if not ok and why==cancelledClose then
+        -- A native close may complete after the original trip opened contacts.
+        -- Reopen and verify, preserving the original incident on success.
+        R.openingBreakers=(R.openingBreakers or 0)+1
+        local opened,reason=U.openAll(s)
+        R.openingBreakers=R.openingBreakers-1
+        R.state.isolationVerified=opened
+        if not opened then R.trip('breaker_open_failed','Cannot isolate cancelled close: '..tostring(reason)) end
+      elseif not ok then local reason=tostring(why); R.trip(reason:find('bank_misaligned',1,true) and 'bank_misaligned' or reason:find('variac_stuck',1,true) and 'variac_stuck' or 'protection_interlock',reason) end
       sleep(.05)
     end
   end

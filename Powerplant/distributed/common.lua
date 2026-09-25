@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.21',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.22',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 M.fields={
   inputGauge={label="Voltage entering variacs",help="Required. Voltage gauge AFTER the entry transformer, BEFORE stage A."},

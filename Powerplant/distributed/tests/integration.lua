@@ -69,7 +69,7 @@ local function world(restore,thermalFault,options)
     for name in pairs(W.contacts) do
       devices[name]={isClosed=function() native(); return W.contacts[name] end,
         open=function() native(); if options.openDelay and W.contacts[name] then env.sleep(options.openDelay) end; W.contacts[name]=false end,
-        close=function() native(); if options.closeDelay then env.sleep(options.closeDelay) end; W.closes[#W.closes+1]={role=N.role,name=name}; check(N.role=='protection','non-protection closed a breaker'); if options.failClose~=name then W.contacts[name]=true end end,
+        close=function() native(); if options.tripDuringClose==name and not W.closeTrip then W.closeTrip=true; N.R.trip('test_cancel','Original trip during closure') end; if options.closeDelay then env.sleep(options.closeDelay) end; W.closes[#W.closes+1]={role=N.role,name=name}; check(N.role=='protection','non-protection closed a breaker'); if options.failClose~=name then W.contacts[name]=true end end,
         getStatus=function() native(); return {closed=W.contacts[name],canClose=true,currentValid=true,current=1,tripEnabled=true,tripCurrent=50} end}
     end
     for name in pairs(W.positions) do devices[name]={
@@ -92,6 +92,7 @@ local function world(restore,thermalFault,options)
       if W.openOnInputRead and role=='protection' then
         W.openOnInputRead=false; W.contacts.input=false
       end
+      if options.invalidRegulationInput and role=='regulation' and N.R.state.phase=='await_output' then return 0 end
       return powered() and (W.inputVoltage or 1500) or 0
     end}
     devices.vout={voltage=function() native(); local value=powered() and 3750*(options.voltageScale or 1)*(W.loadScale or 1) or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; if options.transientInBand and role=='regulation' and N.R.state.phase=='tuning' and W.maxStartupAttempt==1 and not W.transientUsed then W.transientUsed=true; return settings.target end; if options.oscillating then value=value*((W.maxStartupAttempt or 0)%2==0 and .97 or 1.03) end; return options.voltageExponent and 3750*(value/3750)^options.voltageExponent or value end}
@@ -384,4 +385,20 @@ for _,temperature in ipairs({140,126}) do
  for _,event in ipairs(hot.nodes[3].R.events) do if event.detail and event.detail.member=='a2' and event.code:match('^thermal_') then thermalReason=true end end
  check(thermalReason and not hot.nodes[3].R.state.realignRequested,'thermal fault missing member or incorrectly scheduled alignment recovery')
 end
+local badInput=world(nil,nil,{lowStart=true,invalidRegulationInput=true})
+badInput.untilTrue(function() return badInput.nodes[3].R.fresh('regulation')~=nil end,3); badInput.command('start')
+check(badInput.untilTrue(function() return badInput.nodes[2].R.state.phase=='tripped' end,60),'invalid regulation reading did not trip')
+badInput.untilTrue(function() return false end,1)
+local inputDetail=false
+for _,event in ipairs(badInput.nodes[2].R.events) do
+ if event.reason:find('Invalid regulator input: 0.000000 V from vin',1,true) and event.reason:find('phase await_output',1,true) then inputDetail=true end
+end
+check(inputDetail,'invalid input incident omitted voltage, gauge or phase')
+local cancelled=world(nil,nil,{lowStart=true,tripDuringClose='minus'})
+cancelled.untilTrue(function() return cancelled.nodes[3].R.fresh('regulation')~=nil end,3); cancelled.command('start')
+check(cancelled.untilTrue(function() return cancelled.closeTrip end,60),'close cancellation fixture did not trigger')
+cancelled.untilTrue(function() return false end,2)
+check(not cancelled.contacts.input and not cancelled.contacts.minus and not cancelled.contacts.plus,'late native close remained energized after trip')
+check(cancelled.nodes[3].R.state.fault=='Original trip during closure','close cancellation masked original fault')
+for _,event in ipairs(cancelled.nodes[3].R.events) do check(not event.reason:find('table:',1,true) and not event.reason:find('Trip superseded close',1,true),'internal cancellation leaked into incident log') end
 print(('PASS: %d distributed integration checks'):format(checks))

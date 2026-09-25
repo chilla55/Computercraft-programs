@@ -14,7 +14,7 @@ function M.new(R)
       for _,name in ipairs(s.inputBreakers) do assert(U.device(name).isClosed(),'unknown_opening: input contact unexpectedly open') end
       U.checkAlignment(s)
       local input=U.voltage(s.inputGauge)
-      assert(input>1 and input<=s.maxInputVolts,'Invalid regulator input')
+      assert(input>1 and input<=s.maxInputVolts,('Invalid regulator input: %.6f V from %s; required >1 V and <=%.2f V; phase %s'):format(input,s.inputGauge,s.maxInputVolts,tostring(R.state.phase)))
       if R.state.phase=='live' then
         assert(U.device(s.plusBreaker).isClosed() and U.device(s.minusBreaker).isClosed(),'unknown_opening: output contact unexpectedly open')
       end
@@ -124,7 +124,8 @@ function M.new(R)
     if err<=s.accuracyVolts then previousLive=nil; unreachableSince=nil; return true end
     local previous=previousLive; previousLive={input=input,output=output}
     if not P.stable(previous,input,output) then unreachableSince=nil; return false end
-    local plan=feedbackPlan(U.positions(s),input,output,target,function()
+    local banks=U.positions(s)
+    local plan=feedbackPlan(banks,input,output,target,function()
       -- Pure search needs a cooperative yield, not another full peripheral scan.
       assert(not R.state.latched,'Live planning interrupted by trip')
       local peer=R.fresh('protection')
@@ -134,7 +135,7 @@ function M.new(R)
     if plan.travel==0 or plan.err>=err-.001 then
       if err<=s.fallbackVolts then unreachableSince=nil; return true end
       unreachableSince=unreachableSince or R.now()
-      assert(R.now()-unreachableSince<3000,'Target unreachable at current input/load')
+      assert(R.now()-unreachableSince<3000,('No improving local adjustment: input %.3f V, output %.3f V, target %.3f V; nearest predicted %.3f V; banks %.3f/%.3f/%.3f degrees; phase live'):format(input,output,target,plan.predicted,banks[1].position*s.travelDegrees,banks[2].position*s.travelDegrees,banks[3].position*s.travelDegrees))
       return false
     end
     apply(plan); previousLive=nil; unreachableSince=nil; pause(s.settleSeconds or .2,false)
