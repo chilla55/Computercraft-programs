@@ -12,8 +12,8 @@ Each boot emits status every 0.5 s to the configured master. Read its node and
 session fields first. Send a fresh dispatch approximately every 0.5 s. The
 master must use increasing integer seq values for this session. On master reboot,
 read lastSeq from status and resume above it. On node reboot use its NEW session.
-All timestamps are os.epoch('utc') milliseconds. Grid samples expire after 2 s;
-dispatch lease expires after 3 s. send success is NOT breaker-close confirmation.
+Envelope/grid timestamps are os.epoch('utc') milliseconds (thermal member timestamps use seconds). Grid samples expire after 2 s;
+supervisory dispatch lease expires after 3 s (v17 defaults to local single-mode fallback). send success is NOT breaker-close confirmation.
 Only status.breakers[1/2].closed reports actual contacts.
 
 MASTER -> UNIT: enable/heartbeat (Lua table)
@@ -23,9 +23,9 @@ MASTER -> UNIT: enable/heartbeat (Lua table)
  grid={voltage=MEASURED_GRID_VOLTS, healthy=GRID_HEALTH_BOOLEAN,
        sampledAt=ACTUAL_GRID_SAMPLE_TIMESTAMP}
 }
-No runningTarget: nominal target is locally configured and remains 2640 V.
+No runningTarget: nominal target stays locally configured. v16 optionally accepts scoped temporary transition targets (below).
 A healthy live grid within the configured nominal range is required to join.
-A dead grid is not automatically black-started by managed mode.
+Parallel mode does not black-start a dead grid. v16 exclusive supply mode requires explicit local configuration (below).
 
 JOIN BEHAVIOUR
 1. Open both breakers and verify isolation.
@@ -53,31 +53,310 @@ Send disable first. Then:
 Wait for standby with fault absent, THEN send fresh enable dispatches. Reset
 acceptance alone does not mean completed. Hardware faults stay latched even if
 normal enable heartbeats continue. Overvoltage/close failures retain at most 3
-retries per run/reset. Stale/unhealthy master data opens and waits for fresh
-healthy enable dispatches. No hardware fault can be bypassed by a master command.
+retries per run/reset. Bank misalignment has a separate one-attempt-per-bank
+recovery: verify both breakers open, home the shared drive to minimum, verify
+EVERY member at minimum, retune and rejoin. Failed/repeated misalignment latches.
+Fresh explicit unhealthy-grid supervision prevents supervised joining. v17 autonomous fallback handles lost/stale supervision as described below. No hardware fault can be bypassed by a master command.
 
 STATUS REQUEST (does not renew enable lease)
 {schema=1,type='get_status',node=NODE_ID,session=SESSION,seq=N,
  sentAt=os.epoch('utc')}
-Periodic status supplies the response; ack only acknowledges the request.
+An accepted request gets ack plus an immediate status with requestSeq=N.
+Requests do not enable the unit or renew its dispatch lease.
 
 UNIT -> MASTER
 Every message: schema=1, node, session, sentAt.
 ack: seq, accepted, optional reason; acceptance means recorded intent only.
 status: phase, nominalTarget, target (temporary active setpoint), enabled, fault,
  retries, minimumGeneratorVolts, inputVoltage, outputVoltage, grid, joinStage,
- variacs[1..3]={position,ratio,shaftSpeed}, breakers[1..2]=native status, lastSeq.
+ variacs[1..3]={position,ratio,shaftSpeed,members}, breakers[1..2]=native status, lastSeq.
+ Each stage retains its primary readings; members lists every configured variac
+ as {name,position,ratio,shaftSpeed}. An unreadable bank is omitted, never zero.
 Missing readings are omitted if a peripheral is unavailable; never assume zero.
 Breaker 1 is plus; breaker 2 is minus. Current signs follow gauge orientation.
 joinStage: standalone, settling, ramping, nominal.
-fault/stopped: reason; stopped also includes breakersOpen verification result.
+v11 status additions (the v1 schema and original fields remain compatible):
+ configuredTarget and currentTarget alias nominalTarget and target, in volts.
+ voltages.input/output={peripheral,available,volts,sampledAt} describe the whole
+ transformer assembly's existing input/output gauges. Missing readings have
+ available=false and no volts/sample timestamp. They are NOT grid-side readings.
+ stages[1..3]={stage,name,gear,available,position,degrees,ratio,members}.
+ stage=1/2/3 maps to A/B/C. Position is 0..1; degrees is from minimum.
+ The first selected member supplies the stage position. members contains every
+ configured variac as {name,available,position,degrees,ratio,shaftSpeed}.
+ An unavailable bank omits its aggregate position; readable members remain.
+ faultDetails describes a currently latched fault; lastFault retains the most
+ recent fault even after recovery: {code,stage,stageName,member,reason,sampledAt}.
+ Stage/member fields are present only when known. Historical lastFault alone
+ does not mean a fault is currently latched; inspect fault/phase and contacts.
+
+v12 optional transformer measurements:
+ voltages.source = BEFORE the entry transformer (raw generator-side voltage).
+ voltages.input = AFTER entry transformer, BEFORE stage A (existing gauge).
+ voltages.preStepUp = AFTER stage C, BEFORE exit transformer.
+ voltages.output = AFTER exit transformer, BEFORE both breakers (existing gauge).
+ Each voltage record includes configured, available, peripheral, volts, sampledAt.
+ Unconfigured optional gauges have configured=false and available=false.
+ Flat sourceVoltage/preStepUpVoltage fields are present only when measured.
+ entryRatio = configured PRIMARY/SECONDARY voltage ratio (5 means 5:1).
+ stepUp = configured EXIT output/input multiplier (2.5 means 2.5x).
+ entryExpectedVoltage = sourceVoltage / entryRatio; exitExpectedVoltage =
+ preStepUpVoltage * stepUp. These nominal predictions are not control feedback.
+ entryMeasuredRatio = sourceVoltage / inputVoltage; exitMeasuredRatio =
+ outputVoltage / preStepUpVoltage. Ratios require both readings above 1 V.
+ ratioChecks.entry/exit={configured,available,tolerancePercent,measured,
+ deviationPercent,withinTolerance}. Default comparison tolerance is 2%.
+ A deviation is diagnostic, not an automatic trip or proof of wrong windings:
+ load/source changes and losses also affect measured ratios. Samples are
+ sequential, not simultaneous. Voltage ratios do not measure power efficiency.
+ minimumGeneratorVolts remains the POST-entry variac-input threshold.
+ minimumSourceVoltsEstimate = minimumGeneratorVolts * entryRatio is only an
+ ideal source-side estimate, not an additional protection threshold.
+
+ sourceMeters.current={configured,available,peripheral,method,amps,sampledAt}.
+ sourceMeters.power={configured,available,peripheral,method,watts,sampledAt}.
+ Both optional meters belong BEFORE the entry transformer / whole assembly.
+ Readers use current()/power(), falling back to getValue(). Assigned gauges
+ must return finite numbers in A/W; values retain the gauge's sign.
+ sourceCurrentAmps and sourcePowerWatts are aliases for available measurements.
+ sourcePowerEstimateWatts = sourceVoltage * abs(sourceCurrentAmps), a DC input
+ power magnitude estimate. It requires both readings within 250 ms of each
+ other; it is omitted otherwise. A power gauge is NOT required for this field.
+ Measured sourcePowerWatts is never populated from an estimate.
+ Missing optional meters remain unavailable and do not stop regulation, EXCEPT
+ a source current gauge becomes required when sourceCurrentTripAmps > 0.
+ sourceCurrentTripAmps defaults to 0 (no fixed source limit); a positive setting enables
+ an absolute source-current limit. sourceCurrentProtectionEnabled reports this.
+ Overlimit or missing/invalid current opens both breakers and latches a fault.
+ Codes: source_overcurrent and source_current_unavailable, with peripheral,
+ currentAmps (if available) and limitAmps. No automatic retry for these faults.
+ This is source-side protection, NOT a measured current limit for every stage
+ or branch. The output breakers cannot remove supply voltage from the assembly.
+ The existing post-entry input and final-output gauges remain mandatory.
+
+v13 per-variac estimated current protection:
+ perVariacTripAmps defaults to 29 A PER variac, independent of voltage. The
+ 2794.423583984375 V reference is recorded for context; its 81.038 kW product
+ is NOT used as a constant-power rating allowing higher current at lower volts.
+ Protection enables when perVariacTripAmps > 0 AND both sourceGauge and
+ sourceCurrentGauge are configured. Set perVariacTripAmps=0 to disable it.
+ It enforces while closing/connected, including live motor movement. With both
+ breakers open, source loss/excitation current is not treated as tap current.
+ A positive fixed sourceCurrentTripAmps remains separately enforced in setup.
+
+ stageCurrentProtection={enabled,enforcing,available,reason,perVariacLimitAmps,
+ referenceVolts,assumesEqualSharing,sourceAmps,sourcePowerEstimateWatts,
+ sourceLimitAmps,effectiveSourceLimitAmps,limitingStage,preExitVoltageMeasured,
+ sampledAt,stages}. Each stage: {stage,name,members,voltageEstimate,bankLimitAmps,
+ bankCurrentEstimate,perVariacCurrentEstimate,sourceLimitAmps}.
+ Unavailable estimates omit limits/current estimates and contain a reason.
+
+ The model uses actual bank positions with calibrated ratios and measured
+ post-entry input voltage. It applies any pre-exit voltage shortfall to all
+ stage-voltage estimates, and never boosts them above calibrated prediction.
+ Use the measured preStepUpGauge if configured; otherwise final output / stepUp
+ estimates pre-exit voltage. Source voltage/current and voltage-anchor samples
+ must be available and within 250 ms. Power estimate = abs(source V * source A).
+ For each stage: bank current estimate = source power / stage voltage estimate;
+ per-variac current estimate = bank current estimate / configured member count;
+ source limit = 29 A * member count * stage voltage estimate / source voltage.
+ The lowest stage source limit wins. effectiveSourceLimitAmps also includes a
+ positive, lower fixed sourceCurrentTripAmps. The configured entryRatio does
+ not scale the measured post-entry voltage a second time.
+
+ Exceeding the calculated limit opens/latches: stage_overcurrent_estimate,
+ numeric stage, stageName, currentAmps (SOURCE), limitAmps (SOURCE),
+ perVariacCurrentEstimate and perVariacLimitAmps. No automatic retries.
+ Missing required model readings while enforcing opens/latches with
+ stage_current_unavailable. A configured pre-exit gauge is required by this
+ model, even though it was previously diagnostic-only.
+ These are estimates assuming forward power flow and equal parallel sharing,
+ not measured individual winding/branch currents. Source measurements cannot
+ detect every unequal-sharing or circulating-current condition.
+
+fault: reason, code, optional stage (1..3), stageName (A/B/C), member,
+ recoverable (whether automatic bank recovery is being attempted).
+ Codes include variac_stuck (no movement or failed minimum-endpoint check),
+ bank_misaligned, drive_timeout, position_unstable, position_mismatch, and
+ controller_fault. Stuck detection identifies an observed movement failure,
+ not a proven mechanical cause; missing shaft power can produce the same fault.
+ For bank misalignment, a recoverable fault precedes endpoint synchronisation.
+ A failed sync emits a non-recoverable fault with the stage and stuck member.
+ stopped: reason and breakersOpen verification result.
 
 SAFETY / NETWORK NOTES
-Disable, stale grid, lost dispatches or unhealthy grid interrupts motor waits
-and opens both contacts. An issued gearshift sequence can still finish after
+Explicit disable or a local protection trip interrupts motor waits and opens both contacts. Lost/stale supervision follows the v17 fallback policy below. An issued gearshift sequence can still finish after
 opening. Local overcurrent, overvoltage, input-voltage and position checks remain.
 These are cooperative CC tasks, not CPU threads. They yield during motor waits
 and long searches. Chunk unloading/computer shutdown still stops the software.
 Rednet is unauthenticated. ID/session/sequence checks reject accidental, replayed
 or misaddressed traffic but cannot authenticate a malicious sender. Use a trusted
 network; no cryptographic security is claimed.
+
+
+v15 measured variac temperature protection:
+ Status adds protectionMode="temperature" (default) or "current" (legacy).
+ Existing protocol/channel/schema and command envelope are unchanged.
+ thermal={enabled,warningC=125,tripC=140,graceSeconds=5,maxAgeSeconds=1,
+   coolSeconds=5,recoveryConfirmSeconds=0.25,recoveryHysteresisC=0.25,
+   curve={{temperatureC=126,seconds=5},{temperatureC=130,seconds=2},
+     {temperatureC=135,seconds=0.5},{temperatureC=140,seconds=0}},fault?,members={...}}
+ Each thermal.members item includes stage (1..3), stageName (A/B/C), member
+ (peripheral name), available, temperatureC?, temperatureSource="measured",
+ sampledAt? (UTC epoch SECONDS), aboveSince? (UTC epoch SECONDS), aboveSeconds,
+ ambientTemperature?, nativeOverheated?, unavailableReason?, exposure,
+ allowanceSeconds?, remainingSeconds?, recoveryUsed, recoveryArmed, coolSeconds.
+ exposure is a consumed budget fraction (1 trips); recovery maps use string keys
+ "126", "130", "135" with true values. Missing keys mean unused/unarmed.
+ remainingSeconds assumes the present temperature stays constant; it is not a
+ promised connection duration. Member coolSeconds is elapsed confirmed cooling;
+ thermal.coolSeconds is the required cooling duration. aboveSeconds measures the
+ episode age, including brief cool dips, not the remaining trip delay.
+ These thermal timestamps are seconds; outer protocol timestamps remain milliseconds.
+ Unavailable readings may retain a previous temperature field: only available=true
+ identifies a fresh usable sample. Before initialization, thermal.available=false
+ and members may be absent. In current mode thermal={enabled=false}.
+
+ Above 125 C consume elapsed seconds / allowed seconds at the last reading.
+ Allowed seconds interpolate between the curve points; 125..126 C uses 5 s.
+ thermalGraceSeconds scales the 126 C allowance and the entire curve.
+ Each downward crossing of 135, 130 or 126 C can refund 0.5 exposure ONCE per
+ level per episode, capped at a full budget. Arm at level+0.25 C, then confirm
+ non-increasing readings for 0.25 s at/below the crossed level. Warming cancels
+ confirmation. A multi-level drop can credit only the reached level, not all
+ skipped levels. Exhausted budgets cannot be rescued by a late cooling sample.
+ Five continuous seconds <=125 C (thermalCoolSeconds) clears exposure/credits;
+ brief cool dips and explicit fault reset retain them. At >=140 C trip on the
+ first sample without grace. Missing/invalid/stale/unavailable
+ thermal data also latch and prevent connection. The monitor interval is
+ nominally 50 ms, subject to peripheral calls and server scheduling.
+ Codes: thermal_overtemperature, thermal_hot_timeout, thermal_reading_unavailable.
+ Fault messages and faultDetails identify stage, stageName and member, and
+ include temperatureC/temperatureSource when known plus warningC, tripC and
+ graceSeconds, exposure and recoveryUsed. A latched fault represents the first triggering condition.
+ Native overheated is informational; the 140 C controller threshold governs.
+
+ Exposure, recovery credits and thermal faults persist across restarts. Offline
+ time charges the last accounting temperature; it does not confirm recovery or
+ sustained cooling. Fresh readings are still required on startup. Cooling
+ alone does not clear a fault. Disable before reset; reset requires fresh
+ temperatures <=125 C on EVERY member. Rejected reset includes an ack reason.
+ After successful reset, send a fresh enable with a valid grid sample.
+ Thermal monitoring continues in managed standby and while fault-latched.
+ Standalone thermal reset is available locally via reset_thermal; it verifies
+ open breakers and fresh cool readings, and leaves both breakers open.
+
+ Temperature mode does not enforce the v13 estimated per-variac current cap;
+ stageCurrentProtection remains diagnostic with enforcing=false. Independent
+ configured source-current and native breaker protections still apply.
+ Migrated configurations without protectionMode default to temperature and
+ require the addon 1.2.0 thermal API on every member. Choose current explicitly
+ to retain v13 estimated-current enforcement without temperature monitoring.
+
+
+v16 role-independent bus references and scoped shutdown preparation:
+ The master supplies the assigned OUTPUT bus reading, whether generator,
+ consumer or transmission voltage. Locally configured nominal target and
+ transformer ratio must match that bus. Do not substitute another bus voltage.
+ connectionMode="parallel" (default) requires an already-live bus.
+ connectionMode="supply" explicitly permits an exclusively owned dead circuit
+ at 0..deadBusVolts (default 5 V). This is a local setting, not remotely enabled.
+ A fresh measured zero is required; unavailable readings never mean dead.
+ Supply mode tunes to the configured/requested target when the bus is dead;
+ for an already-live bus it still matches actual bus voltage before closing.
+ After closing, a bus still dead beyond gridMaxAgeSeconds trips and isolates.
+ Parallel mode retains its existing live-bus join checks.
+
+ Optional field on an enabled dispatch:
+ transition={id="shutdown-event",generator=GENERATOR_ID,targetVolts=2638,
+             expiresAt=UTC_EPOCH_MILLISECONDS}
+ remoteTargetPercent defaults to 0 (disabled) and must be configured locally
+ to opt in. The target must fit nominal +/- this percentage; the percentage
+ must be less than gridDeviationPercent. id is nonempty, <=80 characters;
+ generator is a non-negative integer. Expiry must be future and <=30 seconds.
+ runningTarget remains rejected. Invalid requests do not renew the lease.
+ Accepted transitions do not alter nominal/configuredTarget. Once live,
+ active targets use existing rampVoltsPerSecond/maxRampStepVolts and wait for
+ electrical output to catch up. Joining a live bus still matches its voltage
+ first. All temperature/current/voltage/position protections remain active.
+ Omitted/expired transition returns toward nominal with the same ramp.
+ Disabled dispatch clears transition; it never bypasses a latched fault.
+
+ Status adds connectionMode, deadBusVolts, requestedTarget, transition and:
+ remoteControl={temporaryTarget=true,enabled=BOOLEAN,minTarget,maxTarget,
+                targetToleranceVolts=LOCAL_FALLBACK_VOLTS}.
+ requestedTarget is the current scoped goal or nominal; currentTarget remains
+ the actual progressing regulation setpoint. Compare measured output as well:
+ an accepted target command is not evidence of voltage or power redistribution.
+ This regulator never commands a generator clutch or infers a voltage change
+ from generator maximum power; the upstream controller supplies that plan.
+
+
+ENDER MODEM TRANSPORT
+Use an ender modem on every communicating computer. Configuration lists only
+wireless modem candidates; wired modems are not used for inter-computer rednet.
+The modem API cannot distinguish ender from ordinary wireless hardware, so
+install an actual ender modem. Wired peripheral sharing for this computer's
+local devices remains separate. No remote peripheral access is assumed.
+A missing modem is retried by telemetry; local protections remain active.
+v17 autonomous operation uses the main dispatch lease only for optional supervision; expiry returns to local single mode. Legacy opt-out still opens on expiry. Upstream availability is not a regulator prerequisite: the local
+main controller can supervise without an upstream controller.
+
+
+v17 autonomous single-mode fallback (default):
+ autonomousFallback=true: operate independently using local gauges, local
+ protections and configured nominal voltage when no fresh main/grid data is
+ available. Enabled units stay connected on communications loss; new runs can
+ start in the existing standalone/single-mode algorithm without a supervisor.
+ This does not substitute the isolated output gauge for a grid-side gauge:
+ standalone connection behavior applies whenever supervision is unavailable.
+ autonomousFallback=false retains legacy master-lease-required operation.
+ masterId=-1 retains pure standalone operation without rednet.
+
+ Missing/stale supervision immediately invalidates any temporary voltage goal;
+ live setpoints ramp toward nominal using local limits. Normal regulation
+ keeps nominal fixed. Optional remote targets are solely for generator
+ connection/disconnection preparation, remain disabled by remoteTargetPercent=0
+ by default, and never become permanent nominal configuration.
+
+ Explicit dispatch enabled=false is persisted in transformer-operation-state.json
+ (with .tmp recovery) and cannot expire into enabled operation. Local faults
+ also inhibit operation. Reset does not enable. A valid enable saves enabled
+ intent; local `enable` / `disable` commands save intent with contacts open.
+ Starting `run` applies the saved intent. Missing state defaults to enabled
+ single-mode operation; malformed state prevents operation.
+
+ New MASTER -> UNIT command: type='release', with the normal envelope.
+ It ends supervision/temporary targets without changing enabled intent.
+ Optional dispatch enabled=true,autonomous=true requests local single mode
+ without a grid sample, only when autonomousFallback is enabled locally.
+ Neither can clear a fault. Reset requires effective operation disabled.
+
+ Status adds autonomousFallback, controlMode='single'|'supervised', and
+ supervisionAvailable. enabled now describes effective local operating intent.
+ requestedTarget is nominal in single mode; transition is omitted when no
+ active supervised adjustment exists. Computer/master restart must not send
+ unsolicited disables to autonomous units. Observe their status first.
+
+
+v18 local isolation telemetry:
+ emergencyStopped: persisted local emergency-stop latch. Remote commands do not
+ clear it; local Resume/reset verifies contacts and thermal reset conditions.
+ maintenance={active,verified,drivesIdle,reason}. verified means configured input
+ and output contacts were read open, NOT proof that the assembly has no voltage.
+ inputBreakers=[{name,available,status}]: each configured input isolation contact.
+ enabled is false during maintenance/emergency stop. A dispatch requesting true
+ is rejected until local resume. Existing two-element breakers remains outputs.
+ sparkGapVolts=7500: installation annotation for the independent source spark gap
+ protecting generators; not a controller trip threshold or controllable endpoint.
+ Maintenance and emergency stop open all configured input/output contacts.
+
+Bank synchronization with input isolation:
+ phase=homing covers isolated alignment verification and mechanical recovery.
+ phase=energizing covers input-breaker charging/closure after bank verification.
+ Alignment checks remain active during energized motion. Input and output
+ contacts are opened before endpoint synchronization. Without configured input
+ breakers, recovery latches bank_sync_requires_input_isolation with stage and
+ stageName instead of homing an energized parallel bank. Input closure requires
+ fresh aligned positions and idle drives. Alignment compares members within
+ each bank, not the independently regulated positions of the three stages.
