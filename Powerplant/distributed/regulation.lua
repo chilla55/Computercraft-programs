@@ -116,23 +116,40 @@ function M.new(R)
   end
   local function initialTune()
     local input,output
-    for attempt=1,3 do
+    local function verified(output)
+      for sample=1,3 do
+        if math.abs(output-R.state.activeTarget)>s.fallbackVolts then return false,output end
+        if sample<3 then pause(.15,false); output=U.voltage(s.outputGauge) end
+      end
+      return true,output
+    end
+    local measurements={}
+    R.state.startupMeasurements=measurements
+    for attempt=1,12 do
       guard(false)
       assert(U.device(s.plusBreaker).isClosed()==false and U.device(s.minusBreaker).isClosed()==false,'Output must remain isolated during startup positioning')
       local before=U.stationaryBanks(s); U.aligned(s,before)
       input,output=U.voltage(s.inputGauge),U.voltage(s.outputGauge)
-      if math.abs(output-R.state.activeTarget)<=s.fallbackVolts then return end
+      local ready
+      ready,output=verified(output)
+      if ready then return end
       R.state.phase='planning'
-      local plan=P.initial(s,before,input,attempt>1 and output or nil,R.state.activeTarget,function()
+      local function planningYield()
         -- Yield for independent protection/heartbeats without rescanning every
         -- wired peripheral inside a pure mathematical search.
         assert(not R.state.latched,'Startup planning interrupted by trip')
         local peer=R.fresh('protection')
         assert(peer and not peer.latched and peer.cycle==R.state.cycle,'Protection unavailable during startup planning')
         sleep(0)
-      end)
-      assert(plan.err<=s.fallbackVolts,('Startup target unreachable: predicted %.2f V, target %.2f V'):format(plan.predicted,R.state.activeTarget))
-      assert(plan.travel>0,'Startup voltage does not match the calculated position; check gauges and ratios')
+      end
+      local err=math.abs(output-R.state.activeTarget)
+      local limit=attempt>1 and (err<=R.state.activeTarget*.02 and 1 or 8) or nil
+      local plan=P.initial(s,before,input,attempt>1 and output or nil,R.state.activeTarget,planningYield,limit)
+      if limit==1 and (plan.travel==0 or plan.err>=err-.001) then
+        plan=P.initial(s,before,input,output,R.state.activeTarget,planningYield,8)
+      end
+      assert(attempt>1 or plan.err<=s.fallbackVolts,('Startup target unreachable: predicted %.2f V, target %.2f V'):format(plan.predicted,R.state.activeTarget))
+      assert(plan.travel>0 and (attempt==1 or plan.err<err-.001),'Startup voltage cannot improve with measured corrections; check gauges, settling delay and ratios')
       guard(false)
       local checked=U.stationaryBanks(s); U.aligned(s,checked)
       for i=1,3 do assert(checked[i].position==before[i].position,'Variac position changed during planning: stage '..i) end
@@ -159,9 +176,13 @@ function M.new(R)
       R.state.phase='tuning'
       pause(s.settleSeconds or .2,false)
       output=U.voltage(s.outputGauge)
-      if math.abs(output-R.state.activeTarget)<=s.fallbackVolts then return end
+      measurements[#measurements+1]={attempt=attempt,input=input,output=output,predicted=plan.predicted,target=R.state.activeTarget}
+      ready,output=verified(output)
+      if ready then return end
     end
-    error(('Startup voltage verification failed after 3 calculated plans: measured %.2f V, target %.2f V. Check input stability, gauges and transformer ratios.'):format(output,R.state.activeTarget))
+    local history={}
+    for _,v in ipairs(measurements) do history[#history+1]=('%.2f'):format(v.output) end
+    error(('Startup voltage verification failed after 12 calculated plans: measured %.2f V, target %.2f V, input %.2f V; output history [%s]. Check input stability, settling delay, gauges and transformer ratios.'):format(output,R.state.activeTarget,input,table.concat(history,', ')))
   end
   local function operate()
     R.state.phase='homing'; guard(true)

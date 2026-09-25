@@ -32,8 +32,8 @@ function M.choose(s,banks,input,output,target,limit,yieldFn,simultaneous)
 end
 -- Absolute destinations derived from one input snapshot. Whole-degree
 -- commands respect each shaft's current fractional-angle offset.
-function M.initial(s,banks,input,output,target,yieldFn)
-  local plan=M.choose(s,banks,input,output,target,math.ceil(s.travelDegrees),yieldFn,true)
+function M.initial(s,banks,input,output,target,yieldFn,limit)
+  local plan=M.choose(s,banks,input,output,target,limit or math.ceil(s.travelDegrees),yieldFn,true)
   plan.positions={}; plan.degrees={}
   for i=1,3 do
     plan.positions[i]=math.max(0,math.min(1,banks[i].position+plan[i]/s.travelDegrees))

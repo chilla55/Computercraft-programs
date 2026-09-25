@@ -65,6 +65,14 @@ function M.new(R)
       end
       local input=U.voltage(s.inputGauge); local output=U.voltage(s.outputGauge)
       R.state.inputVoltage=input; R.state.outputVoltage=output
+      -- Native reads yield: a peer trip can open inputs after the contact
+      -- snapshot above. Do not label the resulting dead input as a new fault.
+      if R.state.latched then return end
+      if input<=1 then
+        for _,name in ipairs(s.inputBreakers) do
+          if not U.device(name).isClosed() then return end
+        end
+      end
       assert(input>1 and input<=s.maxInputVolts,'Input voltage outside safe range')
       if s.sourceCurrentTripAmps>0 then
         local p=U.device(s.sourceCurrentGauge); local amps=(p.current or p.getValue)()

@@ -23,4 +23,13 @@ for _,p in ipairs(corrected.positions) do output=output*P.ratio(p) end
 check(math.abs(output-2640)<=1,'measured correction did not account for ratio error')
 local impossible=P.initial(s,banks,500,nil,2640)
 check(impossible.err>1,'unreachable target appears reachable')
+local count,maxError=0,0
+for line in io.lines('Powerplant/distributed/tests/fixtures/variac-calibration.tsv') do
+ local angle,input,output=line:match('^(%d+)%s+([%d%.]+)%s+([%d%.]+)')
+ if angle then
+  count=count+1
+  maxError=math.max(maxError,math.abs(P.ratio(1-tonumber(angle)/315)-tonumber(output)/tonumber(input)))
+ end
+end
+check(count==316 and maxError<2e-7,'planner does not match supplied single-variac calibration')
 print(('PASS: %d calculated startup planner checks'):format(n))

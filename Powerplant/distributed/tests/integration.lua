@@ -84,8 +84,14 @@ local function world(restore,thermalFault,options)
           if name~=W.jammed then W.motion[name]={from=W.positions[name],to=math.max(0,math.min(1,W.positions[name]+degrees*direction/315)),start=W.time,finish=W.time+(N.R.state.phase=='positioning' and options.startupMoveTime or .15)} end
         end
       end} end
-    devices.vin={voltage=function() native(); return powered() and 1500 or 0 end}
-    devices.vout={voltage=function() native(); local value=powered() and 3750*(options.voltageScale or 1) or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; return value end}
+    devices.vin={voltage=function()
+      native()
+      if W.openOnInputRead and role=='protection' then
+        W.openOnInputRead=false; W.contacts.input=false
+      end
+      return powered() and (W.inputVoltage or 1500) or 0
+    end}
+    devices.vout={voltage=function() native(); local value=powered() and 3750*(options.voltageScale or 1) or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; if options.transientInBand and role=='regulation' and N.R.state.phase=='tuning' and W.maxStartupAttempt==1 and not W.transientUsed then W.transientUsed=true; return settings.target end; if options.oscillating then value=value*((W.maxStartupAttempt or 0)%2==0 and .97 or 1.03) end; return options.voltageExponent and 3750*(value/3750)^options.voltageExponent or value end}
     env.peripheral={wrap=function(name) return devices[name] end}; env.print=function() end
     local function mod(name) return assert(loadfile(base..name..'.lua','t',env))() end
     local modules={common=mod('common'),thermal=mod('thermal_protection'),planner=mod('planner'),hash=mod('sha256'),updater=mod('updater')}
@@ -217,6 +223,33 @@ local corrected=world(nil,nil,{lowStart=true,voltageScale=.95})
 corrected.untilTrue(function() return corrected.nodes[3].R.fresh('regulation')~=nil end,3); corrected.command('start')
 check(corrected.untilTrue(function() return corrected.nodes[2].R.state.phase=='live' end,60),'measured voltage correction failed')
 check(corrected.maxStartupAttempt==2,'startup correction was not a bounded recalculation')
+local transient=world(nil,nil,{lowStart=true,voltageScale=.95,transientInBand=true})
+transient.untilTrue(function() return transient.nodes[3].R.fresh('regulation')~=nil end,3); transient.command('start')
+check(transient.untilTrue(function() return transient.nodes[2].R.state.phase=='live' end,60),'single transient acceptable reading prevented startup correction')
+check(transient.transientUsed and transient.maxStartupAttempt==2,'startup accepted one transient in-band reading')
+local nonlinear=world(nil,nil,{lowStart=true,voltageExponent=1.5})
+nonlinear.untilTrue(function() return nonlinear.nodes[3].R.fresh('regulation')~=nil end,3); nonlinear.command('start')
+check(nonlinear.untilTrue(function() return nonlinear.nodes[2].R.state.phase=='live' end,120),'nonlinear startup corrections did not converge')
+check(nonlinear.maxStartupAttempt>3 and nonlinear.maxStartupAttempt<=12,'nonlinear fixture did not exercise extended correction budget')
+check(#nonlinear.nodes[2].R.state.startupMeasurements==nonlinear.maxStartupAttempt,'startup measurements missing')
+local diverging=world(nil,nil,{lowStart=true,oscillating=true})
+diverging.untilTrue(function() return diverging.nodes[3].R.fresh('regulation')~=nil end,3); diverging.command('start')
+check(diverging.untilTrue(function() return diverging.nodes[2].R.state.phase=='tripped' end,180),'nonconverging startup did not stop')
+check(diverging.maxStartupAttempt==12 and not diverging.contacts.plus and not diverging.contacts.minus,'correction limit or isolation failed')
+diverging.untilTrue(function() return false end,.5)
+local historyReason=false
+for _,event in ipairs(diverging.nodes[2].R.events) do if event.reason and event.reason:find('output history',1,true) then historyReason=true end end
+check(historyReason,'nonconverging startup did not record voltage history')
+-- An opening between the contact snapshot and gauge read is a contact fault,
+-- while genuinely low voltage with closed contacts still trips.
+direct.openOnInputRead=true
+direct.untilTrue(function() return direct.nodes[3].R.state.latched end,3)
+direct.untilTrue(function() return false end,.5)
+local falseInputFault=false
+for _,event in ipairs(direct.nodes[3].R.events) do if event.reason and event.reason:find('Input voltage outside safe range',1,true) then falseInputFault=true end end
+check(direct.nodes[3].R.state.latched and not falseInputFault,'contact opening generated false input-voltage fault')
+nonlinear.inputVoltage=0
+check(nonlinear.untilTrue(function() return nonlinear.nodes[3].R.state.latched and not nonlinear.contacts.input end,3),'real undervoltage did not trip')
 local unreachable=world(nil,nil,{lowStart=true,voltageScale=.5})
 unreachable.untilTrue(function() return unreachable.nodes[3].R.fresh('regulation')~=nil end,3); unreachable.command('start')
 check(unreachable.untilTrue(function() return unreachable.nodes[2].R.state.phase=='tripped' end,60),'unreachable startup did not trip')
