@@ -382,7 +382,10 @@ for _,temperature in ipairs({140,126}) do
  check(hot.time-started<10 and not hot.contacts.plus and not hot.contacts.minus,'thermal trip waited for movement or connected output')
  hot.untilTrue(function() return false end,.2)
  local thermalReason=false
- for _,event in ipairs(hot.nodes[3].R.events) do if event.detail and event.detail.member=='a2' and event.code:match('^thermal_') then thermalReason=true end end
+ for _,event in ipairs(hot.nodes[3].R.events) do if event.detail and event.detail.member=='a2' and event.code:match('^thermal_') then
+  thermalReason=true
+  check(event.detail.previousTemperatureC and event.detail.sampleIntervalMs>0 and event.detail.regulationPhase,'thermal trip lacks previous sample/phase evidence')
+ end end
  check(thermalReason and not hot.nodes[3].R.state.realignRequested,'thermal fault missing member or incorrectly scheduled alignment recovery')
 end
 local recovery=world(nil,nil,{lowStart=true})

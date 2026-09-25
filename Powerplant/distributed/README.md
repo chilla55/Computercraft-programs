@@ -25,7 +25,7 @@ wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powe
 install-transformer.lua
 ```
 
-To select an exact release, use `install-transformer.lua transformer distributed-1.1.23` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
+To select an exact release, use `install-transformer.lua transformer distributed-1.1.24` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
 
 The default installation folder is `transformer/`, which holds the original fallback and stable launcher and verifies every file against the GitHub release manifest. It does not replace an existing installation or alter startup scripts. HTTP must be enabled and GitHub accessible. Alternatively, copy all top-level `.lua` files from this directory into `transformer/` using a disk.
 
@@ -168,3 +168,5 @@ The master has a Use terminal / Use monitor button. When the UI is on the monito
 Monitor footers omit terminal keyboard/mouse hints. Display switching sits beside Quit; wide monitor layouts also provide touch scroll arrows on that control row. The full emergency-stop label and its last character remain inside the screen.
 
 A trip that interrupts breaker closure retains its original incident reason. Protection reopens and verifies contacts after the cancelled native close returns; failure to isolate generates a separate fault. Invalid regulator-input incidents include the measured voltage, gauge, permitted range and phase. Live local-search failures report input/output/target, predicted nearest local output and bank angles; they do not claim the target is globally unreachable.
+
+Trip opening attempts every configured input breaker before the output breakers, then verifies all contacts. A failed input opening does not skip other contacts. Thermal sampling faults include the previous valid reading/time, interval and last known regulation phase when available. This shortens source-isolation command latency and improves evidence; it does not guarantee protection against heating faster than peripheral sampling and breaker response.

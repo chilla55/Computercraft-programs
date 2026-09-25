@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.23',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.24',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 M.fields={
   inputGauge={label="Voltage entering variacs",help="Required. Voltage gauge AFTER the entry transformer, BEFORE stage A."},
@@ -97,11 +97,13 @@ function M.validate(c)
   return c
 end
 function M.names(s)
-  local n={s.plusBreaker,s.minusBreaker}; for _,name in ipairs(s.inputBreakers) do n[#n+1]=name end; return n
+  local n={}; for _,name in ipairs(s.inputBreakers) do n[#n+1]=name end
+  n[#n+1]=s.plusBreaker; n[#n+1]=s.minusBreaker; return n
 end
 function M.device(name) return assert(peripheral.wrap(name),'Missing peripheral '..name) end
 function M.openAll(s)
-  -- All attempts precede verification; a failed contact does not skip another.
+  -- Remove variac source power first. All attempts precede verification;
+  -- a failed input contact must not skip any remaining input/output contact.
   local errors={}
   for _,name in ipairs(M.names(s)) do local ok,e=pcall(function() M.device(name).open() end); if not ok then errors[#errors+1]=tostring(e) end end
   for _,name in ipairs(M.names(s)) do local ok,e=pcall(function() assert(M.device(name).isClosed()==false,name..' not verified open') end); if not ok then errors[#errors+1]=tostring(e) end end

@@ -7,6 +7,7 @@ function M.new(R)
   local saved=U.read('distributed-thermal.json'); if saved then policy.restore(saved) end
   local lastSaved,expected,processed=nil,{},{}
   local temperatures={}
+  local lastTemperature={}
   local thermalReady=false
   local movingSince={}
   local function save()
@@ -22,7 +23,20 @@ function M.new(R)
           assert(type(t)=='table' and t.available==true and t.unit=='C' and U.finite(t.temperature) and t.temperature>=-273.15,'Invalid temperature '..name)
           return t.temperature
         end)
-        local fault=policy.update(name,ok and v or nil,R.now()/1000,'measured')
+        local sampledAt=R.now()
+        local previous=lastTemperature[name]
+        local fault=policy.update(name,ok and v or nil,sampledAt/1000,'measured')
+        if fault and fault.member==name then
+          fault.sampledAt=sampledAt
+          if previous then
+            fault.previousTemperatureC=previous.temperature
+            fault.previousSampledAt=previous.at
+            fault.sampleIntervalMs=sampledAt-previous.at
+          end
+          local peer=R.fresh('regulation')
+          fault.regulationPhase=peer and peer.phase or 'unavailable'
+        end
+        if ok then lastTemperature[name]={temperature=v,at=sampledAt} end
         temperatures[#temperatures+1]={name=name,stage=i,temperature=ok and v or nil,reason=not ok and tostring(v) or nil,sampledAt=R.now()}
         if fault and (not R.state.latched or R.state.realignRequested) then R.trip(fault.code,fault.reason,fault) end
       end

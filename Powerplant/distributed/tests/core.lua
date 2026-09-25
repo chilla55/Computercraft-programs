@@ -36,4 +36,16 @@ m.seq=3; m.sentAt=0; check(not U.accept(cfg,peers,2,m,3000),'stale message accep
 m.sentAt=3000; m.session='boot2'; check(not U.accept(cfg,peers,2,m,3000),'unknown boot command accepted')
 m.kind='hello'; check(U.accept(cfg,peers,2,m,3000),'new boot hello rejected')
 check(U.canonical({a=1,b={2,3}})==U.canonical({b={2,3},a=1}),'unstable configuration digest')
+-- Source isolation must be attempted first, even when an input open fails.
+local savedPeripheral=peripheral
+for _,failed in ipairs({'none','input1'}) do
+ local calls={}; local states={input1=true,input2=true,plus=true,minus=true}
+ peripheral={wrap=function(name) return {
+  open=function() calls[#calls+1]='open '..name; if name==failed then error('jammed') end; states[name]=false end,
+  isClosed=function() calls[#calls+1]='verify '..name; return states[name] end} end}
+ local ok=U.openAll({inputBreakers={'input1','input2'},plusBreaker='plus',minusBreaker='minus'})
+ check(ok==(failed=='none'),'failed input opening was not reported')
+ check(table.concat(calls,',')=='open input1,open input2,open plus,open minus,verify input1,verify input2,verify plus,verify minus','source-first trip order or best-effort opening failed')
+end
+peripheral=savedPeripheral
 print(('PASS: %d distributed core/update checks'):format(count))
