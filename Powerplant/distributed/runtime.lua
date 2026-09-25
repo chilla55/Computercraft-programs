@@ -66,7 +66,9 @@ function M.new(config,node,modules,root)
     R.state.tripPending=code=='unknown_opening' or nil
     R.tripPendingUntil=R.state.tripPending and requestedAt+2000 or nil
     R.faultAt=requestedAt
+    R.openingBreakers=(R.openingBreakers or 0)+1
     local opened,why=U.openAll(config.settings) -- No network or disk prerequisite.
+    R.openingBreakers=R.openingBreakers-1
     if repeated then R.state.message=not opened and why or R.state.message; return end
     if not remote then R.lastLocalFault=tostring(code)..':'..tostring(reason) end
     local event=remote and U.copy(remote) or {id=R.token(),origin=R.role,computer=os.getComputerID(),at=R.now(),code=code,reason=reason,detail=detail,cycle=R.state.cycle}

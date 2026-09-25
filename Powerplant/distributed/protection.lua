@@ -38,7 +38,11 @@ function M.new(R)
       local fault=policy.check(R.now()/1000)
       if fault then save(); R.trip(fault.code,fault.reason,fault); return end
     end
+    local generation=R.state.generation
     local contacts=U.contacts(s); R.state.contacts=contacts
+    -- A thermal/remote trip can yield while opening contacts. Discard a
+    -- snapshot spanning that transition and re-read after opening completes.
+    if generation~=R.state.generation or (R.openingBreakers or 0)>0 then return end
     local energized=false
     for _,name in ipairs(s.inputBreakers) do energized=energized or contacts[name].closed end
     if not R.state.latched then

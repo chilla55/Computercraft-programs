@@ -67,7 +67,7 @@ local function world(restore,thermalFault,options)
     local devices={back={isWireless=function() return true end}}
     for name in pairs(W.contacts) do
       devices[name]={isClosed=function() native(); return W.contacts[name] end,
-        open=function() native(); W.contacts[name]=false end,
+        open=function() native(); if options.openDelay and W.contacts[name] then env.sleep(options.openDelay) end; W.contacts[name]=false end,
         close=function() native(); if options.closeDelay then env.sleep(options.closeDelay) end; W.closes[#W.closes+1]={role=N.role,name=name}; check(N.role=='protection','non-protection closed a breaker'); if options.failClose~=name then W.contacts[name]=true end end,
         getStatus=function() native(); return {closed=W.contacts[name],canClose=true,currentValid=true,current=1,tripEnabled=true,tripCurrent=50} end}
     end
@@ -234,6 +234,24 @@ for _,sample in ipairs(fine.nodes[2].R.state.startupMeasurements) do
 end
 check(sawFine,'startup did not switch to fine feedback inside 10V')
 for _,move in ipairs(fine.moves) do if move.phase=='fine_tuning' then check(move.degrees<=16,'fine movement exceeded live algorithm limit') end end
+local delayed=world(nil,nil,{lowStart=true,openDelay=.15})
+delayed.untilTrue(function() return delayed.nodes[3].R.fresh('regulation')~=nil end,3); delayed.command('start')
+check(delayed.untilTrue(function() return delayed.nodes[2].R.state.phase=='live' end,60),'delayed-open fixture did not start')
+delayed.temperature.c1=127
+check(delayed.untilTrue(function() return delayed.nodes[3].R.state.latched and not delayed.contacts.input and not delayed.contacts.plus and not delayed.contacts.minus end,6),'thermal curve did not isolate delayed contacts')
+delayed.untilTrue(function() return false end,.5)
+local realHeat,spuriousClosed=false,false
+for _,event in ipairs(delayed.nodes[3].R.events) do
+ if event.code=='thermal_hot_timeout' then realHeat=true end
+ if event.code=='unexpected_closed' then spuriousClosed=true end
+end
+check(realHeat and not spuriousClosed,'normal thermal opening reported unexpected closed contact')
+delayed.contacts.plus=true
+check(delayed.untilTrue(function() return not delayed.contacts.plus end,2),'contact actually closed while latched was not reopened')
+delayed.untilTrue(function() return false end,.5)
+local actualClosed=false
+for _,event in ipairs(delayed.nodes[3].R.events) do if event.code=='unexpected_closed' then actualClosed=true end end
+check(actualClosed,'real unexpected closed contact was suppressed')
 local preset=fine.nodes[2].files['/config/distributed-startup.json']
 check(type(preset)=='string','successful no-load startup did not save preset under /config')
 local reused=world(nil,nil,{lowStart=true,voltageScale=.999,cachedPreset=preset})
