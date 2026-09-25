@@ -4,9 +4,16 @@ local U=module('common')
 local D=module('discovery')
 local node=U.read('distributed-node.json')
 local function prompt(label,default,parse)
-  write(label..' ['..tostring(default or '')..']: '); local value=read()
-  if value=='' then return default end
-  return parse and assert(parse(value),'Invalid '..label) or value
+  while true do
+    write(label..' ['..tostring(default or '')..']: ')
+    local value=read():match('^%s*(.-)%s*$')
+    if not parse then return value=='' and default or value end
+    local candidate=value=='' and tostring(default or '') or value
+    if label:find('(%)',1,true) then candidate=candidate:gsub('%%$',''):match('^%s*(.-)%s*$') end
+    local parsed=parse(candidate)
+    if parsed~=nil and (type(parsed)~='number' or U.finite(parsed)) then return parsed end
+    print('Please enter a number. Press Enter to keep the shown default.')
+  end
 end
 local function installStartup()
   local existing={}

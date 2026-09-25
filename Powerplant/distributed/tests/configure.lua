@@ -29,7 +29,7 @@ local function run(saved,legacy,answers,startup,role)
    for key,field in pairs(U.fields) do if field.label==label then label=key; break end end
    observed[label]=text
  end,
- read=function() return (answers or {})[label] or '' end},{__index=_G})
+ read=function() local answer=(answers or {})[label]; if type(answer)=='table' then return table.remove(answer,1) or '' end; return answer or '' end},{__index=_G})
  local ok,why=pcall(assert(loadfile(base..'app.lua','t',env)),base,'configure',role or 'master')
  return ok,written,observed,why,files
 end
@@ -70,4 +70,12 @@ for _,role in ipairs({'regulation','protection'}) do
 end
 local zero,zeroNode=run(custom,nil,{positionToleranceDegrees='0'})
 check(zero and zeroNode.config.settings.positionToleranceDegrees==0,'zero movement tolerance rejected')
+local blank,blankNode=run(custom,nil,{outputTripPercent='   '})
+check(blank and blankNode.config.settings.outputTripPercent==10,'whitespace did not keep overvoltage default')
+local percent,percentNode=run(custom,nil,{outputTripPercent=' 10% '})
+check(percent and percentNode.config.settings.outputTripPercent==10,'percentage input rejected')
+local retried,retryNode=run(custom,nil,{outputTripPercent={'oops','1e999',''}})
+check(retried and retryNode.config.settings.outputTripPercent==10,'invalid numeric input aborted setup instead of retrying')
+local typed,typedNode=run(custom,nil,{outputTripPercent=' 12.5 '})
+check(typed and typedNode.config.settings.outputTripPercent==12.5,'valid numeric input changed')
 print(('PASS: %d commissioning checks'):format(count))
