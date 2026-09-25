@@ -1,5 +1,11 @@
 -- Same calibrated whole-degree search as the standalone regulator, pure inputs.
 local M={}
+-- The original feedback loop accepts modest source/load variation while
+-- retaining two samples after every completed correction.
+function M.stable(previous,input,output)
+  return previous~=nil and math.abs(input-previous.input)<=math.max(1,math.abs(previous.input)*.005)
+    and math.abs(output-previous.output)<=math.max(1,math.abs(previous.output)*.005)
+end
 function M.ratio(p) return .00999996389330349+.989990071137444*p end
 function M.choose(s,banks,input,output,target,limit,yieldFn,simultaneous,preferBalance)
   local angle,lo,hi={},{},{}

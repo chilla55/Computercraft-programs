@@ -66,4 +66,8 @@ check(not P.cached(settings,start,entry,1450,2400,'hardware'),'changed target re
 check(not P.cached(settings,start,entry,1450,2640,'changed hardware'),'changed configuration reused preset')
 entry.positions[2]=0/0
 check(not P.cached(settings,start,entry,1450,2640,'hardware'),'invalid saved position accepted')
+check(P.stable({input=1450,output=2640},1452,2644),'small variation stalls live feedback')
+check(not P.stable({input=1450,output=2640},1500,2644),'unstable input accepted')
+check(not P.stable({input=1450,output=2640},1450,2700),'unstable output accepted')
+check(not P.stable(nil,1450,2640),'first reading accepted without verification')
 print(('PASS: %d calculated startup planner checks'):format(n))

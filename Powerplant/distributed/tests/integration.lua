@@ -296,18 +296,27 @@ local reused=world(nil,nil,{lowStart=true,voltageScale=.999,cachedPreset=preset}
 reused.untilTrue(function() return reused.nodes[3].R.fresh('regulation')~=nil end,3); reused.command('start')
 check(reused.untilTrue(function() return reused.nodes[2].R.state.phase=='live' end,60),'cached startup did not reach service')
 check(reused.nodes[2].R.state.startupMeasurements[1].mode=='cached' and reused.maxStartupAttempt==1,'cached startup did not reuse learned bank positions')
+local recoveryStarted=fine.time
 fine.loadScale=.97
 local function loadedError()
  local v=3750*.999*.97
  for _,name in ipairs({'a1','b1','c1'}) do v=v*(.00999996389330349+.989990071137444*fine.positions[name]) end
  return math.abs(v-2640)
 end
-check(fine.untilTrue(function() return loadedError()<=1 end,120),'small-step live feedback did not recover load sag')
+check(fine.untilTrue(function() return loadedError()<=1 end,120),'coarse/fine live feedback did not recover load sag')
+check(fine.time-recoveryStarted<2,'coarse recovery regressed to slow single-degree stepping')
 check(fine.nodes[2].R.state.phase=='live','load correction tripped')
-local liveMoves=0
-for _,move in ipairs(fine.moves) do if move.phase=='live' then liveMoves=liveMoves+1; check(move.degrees<=1,'large bank movement issued under load') end end
-check(liveMoves>0,'load test did not exercise live movements')
+local liveMoves,coarseMoves=0,0
+for _,move in ipairs(fine.moves) do if move.phase=='live' then
+ liveMoves=liveMoves+1; check(move.degrees<=8,'live command exceeded coarse limit')
+ if move.degrees>1 then coarseMoves=coarseMoves+1 end
+end end
+check(liveMoves>0 and coarseMoves>0,'load test did not exercise coarse recovery')
 check(fine.nodes[2].files['/config/distributed-startup.json']==preset,'loaded operation overwrote no-load preset')
+fine.loadScale=.94
+check(fine.untilTrue(function() return next(fine.motion)~=nil end,5),'second sag did not start a live correction')
+fine.temperature.c1=140
+check(fine.untilTrue(function() return not fine.contacts.input and not fine.contacts.plus and not fine.contacts.minus end,2),'thermal trip delayed during live correction')
 local corrupt=world(nil,nil,{lowStart=true,cachedPreset='not a table'})
 corrupt.untilTrue(function() return corrupt.nodes[3].R.fresh('regulation')~=nil end,3); corrupt.command('start')
 check(corrupt.untilTrue(function() return corrupt.nodes[2].R.state.phase=='live' end,60),'corrupt optional preset prevented startup')

@@ -110,27 +110,34 @@ function M.new(R)
   end
   local function feedbackPlan(banks,input,output,target,yieldFn,isolated)
     local err=math.abs(output-target)
-    local limit=isolated and err>target*.02 and 16 or 1
+    local limit=err>target*.02 and (isolated and 16 or 8) or 1
     local plan=P.choose(s,banks,input,output,target,limit,yieldFn,false,false)
     if isolated and limit==1 and err>s.fallbackVolts and (plan.travel==0 or plan.err>=err-.001 or plan.err>s.fallbackVolts) then
       plan=P.choose(s,banks,input,output,target,16,yieldFn,false,false)
     end
     return plan
   end
-  local previousLive
+  local previousLive,unreachableSince
   local function tune()
     local input,output=U.voltage(s.inputGauge),U.voltage(s.outputGauge)
     local target=R.state.activeTarget; local err=math.abs(output-target)
-    if err<=s.accuracyVolts then previousLive=nil; return true end
+    if err<=s.accuracyVolts then previousLive=nil; unreachableSince=nil; return true end
     local previous=previousLive; previousLive={input=input,output=output}
-    if not previous or math.abs(output-previous.output)>s.fallbackVolts
-      or math.abs(input-previous.input)*target/math.max(input,1)>s.fallbackVolts then return false end
-    local plan=feedbackPlan(U.positions(s),input,output,target,function() pause(.01,false) end)
+    if not P.stable(previous,input,output) then unreachableSince=nil; return false end
+    local plan=feedbackPlan(U.positions(s),input,output,target,function()
+      -- Pure search needs a cooperative yield, not another full peripheral scan.
+      assert(not R.state.latched,'Live planning interrupted by trip')
+      local peer=R.fresh('protection')
+      assert(peer and not peer.latched and peer.cycle==R.state.cycle,'Protection unavailable during live planning')
+      sleep(0)
+    end)
     if plan.travel==0 or plan.err>=err-.001 then
-      if err<=s.fallbackVolts then return true end
-      error('Target unreachable at current input/load')
+      if err<=s.fallbackVolts then unreachableSince=nil; return true end
+      unreachableSince=unreachableSince or R.now()
+      assert(R.now()-unreachableSince<3000,'Target unreachable at current input/load')
+      return false
     end
-    apply(plan); previousLive=nil; pause(math.max(s.settleSeconds or .2,.5),false)
+    apply(plan); previousLive=nil; unreachableSince=nil; pause(s.settleSeconds or .2,false)
     return math.abs(U.voltage(s.outputGauge)-target)<=s.fallbackVolts
   end
   local function initialTune()
@@ -272,7 +279,7 @@ function M.new(R)
     U.write('/config/transformer-diagnostic.json',report)
   end
   local function operate()
-    previousLive=nil
+    previousLive=nil; unreachableSince=nil
     R.state.startupMeasurements=nil; R.state.startupPlan=nil
     R.state.phase='homing'; guard(true)
     for i=1,3 do
