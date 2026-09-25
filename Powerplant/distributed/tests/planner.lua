@@ -91,4 +91,30 @@ for _,case in ipairs({{2300,16},{2376,8},{2500,8},{2587.2,1},{2640,1},{2692.8,1}
 end
 local hold=P.feedback(settings,uneven,1500,target,target)
 check(hold.travel==0,'live feedback rebalanced unequal banks already at target')
+
+-- Fast recovery only moves one bank toward the target and respects both
+-- the movement band and predicted target crossing bound.
+for _,output in ipairs({2540,2740,2200,3100}) do
+ local plan=P.feedback(settings,stuck,1448.8,output,2640)
+ check(plan.fast,'large deviation did not use direct recovery')
+ local active=0
+ for i=1,3 do if plan[i]~=0 then
+  active=active+1
+  check(plan[i]*(2640-output)>0,'coarse recovery moves away from target')
+  check(math.abs(plan[i])<=plan.limit,'coarse recovery exceeded movement band')
+ end end
+ check(active==1 and plan.err<math.abs(output-2640),'coarse recovery did not improve with one bank')
+ check((plan.predicted-2640)*(2640>output and 1 or -1)<=settings.fallbackVolts,'coarse recovery crossed target')
+end
+local balancingBanks={{position=290/315},{position=260/315},{position=275/315}}
+local balance=P.balance(settings,balancingBanks,2640,2640)
+check(balance and balance.spread<30,'unequal banks did not balance')
+local bp={290/315,260/315,275/315}; local bv=2640
+for _,step in ipairs(balance.steps) do
+ local nextPosition=bp[step.stage]+step.degrees/315
+ bv=bv*P.ratio(nextPosition)/P.ratio(bp[step.stage]); bp[step.stage]=nextPosition
+ check(math.abs(bv-2640)<=10 and math.abs(step.degrees)==1,'balance path exceeded voltage band')
+end
+check(not P.balance(settings,balancingBanks,2629,2640),'balancing ran outside voltage band')
+check(not P.balance(settings,{{position=.8},{position=.8},{position=.8}},2640,2640),'already balanced banks moved')
 print(('PASS: %d calculated startup planner checks'):format(n))

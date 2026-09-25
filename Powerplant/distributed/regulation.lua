@@ -105,6 +105,11 @@ function M.new(R)
       local i,delta=step.stage,step.degrees
       U.aligned(s)
       local before=U.positions(s)[i]
+      if plan.balance then
+        local output=U.voltage(s.outputGauge)
+        local predicted=output*P.ratio(before.position+delta/s.travelDegrees)/P.ratio(before.position)
+        if math.abs(output-plan.target)>10 or math.abs(predicted-plan.target)>10 then return end
+      end
       local after=move(i,math.abs(delta),(delta>0 and 1 or -1)*directions[i],false)
       for j,member in ipairs(after.members) do
         local expected=math.max(0,math.min(1,before.members[j].position+delta/s.travelDegrees))
@@ -119,10 +124,20 @@ function M.new(R)
   local function tune()
     local input,output=U.voltage(s.inputGauge),U.voltage(s.outputGauge)
     local target=R.state.activeTarget; local err=math.abs(output-target)
-    if err<=s.accuracyVolts then previousLive=nil; unreachableSince=nil; return true end
     local previous=previousLive; previousLive={input=input,output=output}
-    if not P.stable(previous,input,output) then unreachableSince=nil; return false end
+    -- A significant sag/rise needs a prompt bounded correction. Fine tuning
+    -- still waits for stable readings; every completed move is re-measured.
+    if err/target<=.02+1e-12 and not P.stable(previous,input,output) then unreachableSince=nil; return false end
     local banks=U.positions(s)
+    local balance=err<=10 and P.balance(s,banks,output,target) or nil
+    if balance then
+      apply(balance); previousLive=nil; unreachableSince=nil
+      pause(s.settleSeconds or .2,false)
+      return math.abs(U.voltage(s.outputGauge)-target)<=10
+    end
+    -- Accept the balancing band instead of undoing a successful balance
+    -- solely to chase sub-volt precision and then balancing back again.
+    if err<=10 then unreachableSince=nil; return true end
     local plan=feedbackPlan(banks,input,output,target,function()
       -- Pure search needs a cooperative yield, not another full peripheral scan.
       assert(not R.state.latched,'Live planning interrupted by trip')

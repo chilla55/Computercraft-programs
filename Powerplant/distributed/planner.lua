@@ -51,12 +51,73 @@ function M.choose(s,banks,input,output,target,limit,yieldFn,simultaneous,preferB
   end
   return assert(best,'No available variac setting')
 end
+-- Search tiny balancing paths, checking BOTH voltage bounds at every
+-- intermediate destination. A balanced final product alone is insufficient.
+function M.balance(s,banks,output,target)
+  if math.abs(output-target)>10 then return nil end
+  local positions={banks[1].position,banks[2].position,banks[3].position}
+  local spread=(math.max(table.unpack(positions))-math.min(table.unpack(positions)))*s.travelDegrees
+  local best
+  local function visit(pos,voltage,used,steps)
+    local nextSpread=(math.max(table.unpack(pos))-math.min(table.unpack(pos)))*s.travelDegrees
+    if nextSpread<spread-.001 and (not best or nextSpread<best.spread-.001
+      or math.abs(nextSpread-best.spread)<=.001 and (#steps<#best.steps
+      or #steps==#best.steps and math.abs(voltage-target)<best.err)) then
+      local copied={}; for i,step in ipairs(steps) do copied[i]={stage=step.stage,degrees=step.degrees} end
+      best={balance=true,steps=copied,spread=nextSpread,err=math.abs(voltage-target),predicted=voltage,travel=#steps,target=target}
+    end
+    if #steps==3 then return end
+    for i=1,3 do if not used[i] then
+      for _,delta in ipairs({-1,1}) do
+        local after=pos[i]+delta/s.travelDegrees
+        if after>=0 and after<=1 then
+          local predicted=voltage*M.ratio(after)/M.ratio(pos[i])
+          if math.abs(predicted-target)<=10 then
+            local before=pos[i]; pos[i]=after; used[i]=true; steps[#steps+1]={stage=i,degrees=delta}
+            visit(pos,predicted,used,steps)
+            steps[#steps]=nil; used[i]=nil; pos[i]=before
+          end
+        end
+      end
+    end end
+  end
+  visit(positions,output,{},{}); return best
+end
+-- Coarse live recovery prioritizes one useful movement over a precise
+-- multi-bank combination. Re-measure before selecting the next movement.
+function M.fastFeedback(s,banks,output,target,limit)
+  if output<=1 then return nil end
+  local err=math.abs(output-target)
+  local sign=target>output and 1 or -1
+  local best
+  for i=1,3 do
+    for degrees=1,limit do
+      local position=banks[i].position+sign*degrees/s.travelDegrees
+      if position>=0 and position<=1 then
+        local predicted=output*M.ratio(position)/M.ratio(banks[i].position)
+        local nextError=math.abs(predicted-target)
+        -- Do not trade a sag for a predicted overshoot (or vice versa).
+        local crossing=(predicted-target)*sign
+        if crossing<=s.fallbackVolts and nextError<err-.001
+          and (not best or nextError<best.err-.001 or math.abs(nextError-best.err)<=.001 and degrees<best.travel) then
+          best={0,0,0,err=nextError,travel=degrees,predicted=predicted,limit=limit,fast=true}
+          best[i]=sign*degrees
+        end
+      end
+    end
+  end
+  return best
+end
 -- Normal feedback uses three error bands. Widen a stalled fine search only
 -- outside fallback; accepting a local minimum is not a capacity test.
 function M.feedback(s,banks,input,output,target,yieldFn,isolated)
   local err=math.abs(output-target)
   local deviation=err/target
   local limit=deviation>.10+1e-12 and 16 or deviation>.02+1e-12 and 8 or 1
+  if not isolated and err>10 then
+    local fast=M.fastFeedback(s,banks,output,target,limit)
+    if fast then return fast end
+  end
   local plan=M.choose(s,banks,input,output,target,limit,yieldFn,false,false)
   plan.limit=limit
   if isolated and limit==1 and err>s.fallbackVolts and (plan.travel==0 or plan.err>=err-.001 or plan.err>s.fallbackVolts) then

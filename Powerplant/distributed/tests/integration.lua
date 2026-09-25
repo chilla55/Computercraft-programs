@@ -324,14 +324,18 @@ reused.untilTrue(function() return reused.nodes[3].R.fresh('regulation')~=nil en
 check(reused.untilTrue(function() return reused.nodes[2].R.state.phase=='live' end,60),'cached startup did not reach service')
 check(reused.nodes[2].R.state.startupMeasurements[1].mode=='cached' and reused.maxStartupAttempt==1,'cached startup did not reuse learned bank positions')
 local recoveryStarted=fine.time
-fine.loadScale=.97
+fine.loadScale=2540/2640
+local beforeSagMoves=#fine.moves
 local function loadedError()
- local v=3750*.999*.97
+ local v=3750*.999*(2540/2640)
  for _,name in ipairs({'a1','b1','c1'}) do v=v*(.00999996389330349+.989990071137444*fine.positions[name]) end
  return math.abs(v-2640)
 end
-check(fine.untilTrue(function() return loadedError()<=1 end,120),'coarse/fine live feedback did not recover load sag')
-check(fine.time-recoveryStarted<2,'coarse recovery regressed to slow single-degree stepping')
+check(fine.untilTrue(function() return #fine.moves>beforeSagMoves end,1),'100 V sag did not trigger prompt correction')
+check(fine.time-recoveryStarted<.3,'large sag waited for extra stable readings')
+check(fine.untilTrue(function() return loadedError()<=10 end,120),'direct recovery did not reach the 10 V band')
+check(fine.time-recoveryStarted<2,'100 V sag recovery to 10 V band is too slow')
+check(fine.untilTrue(function() return loadedError()<=10 and not next(fine.motion) end,120),'recovery did not settle within balancing band')
 check(fine.nodes[2].R.state.phase=='live','load correction tripped')
 local liveMoves,coarseMoves=0,0
 for _,move in ipairs(fine.moves) do if move.phase=='live' then
@@ -420,18 +424,38 @@ local function recoveryOutput()
  return v
 end
 recovery.loadScale=2636.037/recoveryOutput(); recovery.inputVoltage=1447.419
-check(recovery.untilTrue(function() return math.abs(recoveryOutput()-2640)<.1 and not next(recovery.motion) end,60),'reported fine-search minimum failed live recovery')
+check(recovery.untilTrue(function() return math.abs(recoveryOutput()-2640)<=10 and not next(recovery.motion) end,60),'reported fine-search minimum failed live recovery')
 check(recovery.nodes[2].R.state.phase=='live','fine recovery tripped')
 for _,m in ipairs(recovery.moves) do if m.phase=='live' then check(m.degrees==1,'fine recovery did not interleave single-degree commands') end end
 local moveCount=#recovery.moves
 recovery.loadScale=recovery.loadScale*.8
-check(recovery.untilTrue(function() return math.abs(recoveryOutput()-2640)<=1 and not next(recovery.motion) end,60),'large sag failed recovery')
+check(recovery.untilTrue(function() return math.abs(recoveryOutput()-2640)<=10 and not next(recovery.motion) end,60),'large sag failed recovery')
 local large=false
 for i=moveCount+1,#recovery.moves do
  local m=recovery.moves[i]; check(m.degrees<=16,'large recovery exceeded 16-degree bound')
  if m.degrees>8 then large=true end
 end
 check(large,'large sag never exercised the new coarse band')
+local balanced=world(nil,nil,{lowStart=true})
+balanced.untilTrue(function() return balanced.nodes[3].R.fresh('regulation')~=nil end,3); balanced.command('start')
+check(balanced.untilTrue(function() return balanced.nodes[2].R.state.phase=='live' end,60),'balancing fixture failed startup')
+for name,angle in pairs({a1=290,a2=290,b1=260,c1=275}) do balanced.positions[name]=angle/315 end
+local function balanceOutput()
+ local v=3750*(balanced.loadScale or 1)
+ for _,name in ipairs({'a1','b1','c1'}) do v=v*(.00999996389330349+.989990071137444*balanced.positions[name]) end
+ return v
+end
+balanced.loadScale=2640/balanceOutput()
+local startMoves=#balanced.moves
+local finish=balanced.time+20
+while balanced.time<finish do
+ balanced.step()
+ assert(math.abs(balanceOutput()-2640)<=10.001,'live balancing left permitted voltage band')
+end
+local spread=(math.max(balanced.positions.a1,balanced.positions.b1,balanced.positions.c1)-math.min(balanced.positions.a1,balanced.positions.b1,balanced.positions.c1))*315
+check(spread<30 and #balanced.moves>startMoves,'live banks did not move closer together')
+check(balanced.nodes[2].R.state.phase=='live','live balancing tripped')
+for i=startMoves+1,#balanced.moves do check(balanced.moves[i].degrees==1,'balancing used a large movement') end
 local badInput=world(nil,nil,{lowStart=true,invalidRegulationInput=true})
 badInput.untilTrue(function() return badInput.nodes[3].R.fresh('regulation')~=nil end,3); badInput.command('start')
 check(badInput.untilTrue(function() return badInput.nodes[2].R.state.phase=='tripped' end,60),'invalid regulation reading did not trip')
