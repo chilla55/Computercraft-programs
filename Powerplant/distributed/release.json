@@ -1,0 +1,55 @@
+{
+  "files": {
+    "app.lua": {
+      "sha256": "18973cc59e591bcc0af7115560f65982f928761721f561c79286585bc3680f50",
+      "size": 5674
+    },
+    "common.lua": {
+      "sha256": "bcac12cadc743331f3ea0fa41155404e1ef385bba99ca8ef9c66543de7f34a73",
+      "size": 7396
+    },
+    "interface.lua": {
+      "sha256": "3949911f0fa49fe64bffbb42fff05b2241dfadad267e924f12669e3ea81a9069",
+      "size": 5600
+    },
+    "planner.lua": {
+      "sha256": "8bb220d860939266819126ed58466de0957cea59c6f8389bda5830c89151e26c",
+      "size": 1708
+    },
+    "protection.lua": {
+      "sha256": "3172775ab2836917fea50e33a6088f9c2b7494cf4940278f71f84779a900a345",
+      "size": 7807
+    },
+    "regulation.lua": {
+      "sha256": "2a42235fe78819c3386c99bd32f5bba40715d496d4ddbc03167547da4443274a",
+      "size": 6438
+    },
+    "runtime.lua": {
+      "sha256": "ce1364cc78f70f34398e904519df7554b8de35fa9f59ed3c1b8166561930d600",
+      "size": 10431
+    },
+    "sha256.lua": {
+      "sha256": "d85c2a76d06b2ee814e26780347245f5a1780fe3bd7569663692e6e7433149e2",
+      "size": 2020
+    },
+    "thermal_protection.lua": {
+      "sha256": "9aa839c8b209edf1ef0cc9d85501be7a1fff36b602f0a94fb44e3722bfc117e1",
+      "size": 9041
+    },
+    "transformer.lua": {
+      "sha256": "c619a55935878fba93344deeb065f7c8b3458bba5983e45c8df9cc1844db3bd9",
+      "size": 2249
+    },
+    "ui.lua": {
+      "sha256": "5b3543d50837501e54f7e05bdd84015d8f0e57761543eb5b22a39fbe0c292684",
+      "size": 7563
+    },
+    "updater.lua": {
+      "sha256": "0f81875ce92d9031a795a0c1ca632f2dda0fcb534373b0ce5996ba868403a0b9",
+      "size": 8121
+    }
+  },
+  "ref": "distributed-1.0.0",
+  "schema": 1,
+  "version": "distributed-1.0.0"
+}
