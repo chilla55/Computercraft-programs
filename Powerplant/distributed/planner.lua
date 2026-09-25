@@ -12,9 +12,10 @@ function M.choose(s,banks,input,output,target,limit,yieldFn,simultaneous)
     local predicted=basis*M.ratio((angle[1]+a)/s.travelDegrees)*M.ratio((angle[2]+b)/s.travelDegrees)*M.ratio((angle[3]+c)/s.travelDegrees)
     local err,travel=math.abs(predicted-target),math.abs(a)+math.abs(b)+math.abs(c)
     local cost=simultaneous and math.max(math.abs(a),math.abs(b),math.abs(c)) or travel
+    local spread=math.max(angle[1]+a,angle[2]+b,angle[3]+c)-math.min(angle[1]+a,angle[2]+b,angle[3]+c)
     local inside=err<=s.accuracyVolts/2
-    if not best or (inside and not best.inside) or (inside==best.inside and ((inside and (cost<best.cost or cost==best.cost and err<best.err)) or (not inside and err<best.err))) then
-      best={a,b,c,err=err,travel=travel,predicted=predicted,inside=inside,cost=cost}
+    if not best or (inside and not best.inside) or (inside==best.inside and ((inside and (spread<best.spread-1e-9 or math.abs(spread-best.spread)<=1e-9 and (cost<best.cost or cost==best.cost and err<best.err))) or (not inside and err<best.err))) then
+      best={a,b,c,err=err,travel=travel,predicted=predicted,inside=inside,cost=cost,spread=spread}
     end
   end
   local rows=0
@@ -25,6 +26,19 @@ function M.choose(s,banks,input,output,target,limit,yieldFn,simultaneous)
       local c=math.floor(wanted+.5)
       for d=-1,1 do consider(a,b,c+d) end
       consider(a,b,lo[3]); consider(a,b,hi[3])
+      -- With a wide voltage band, its most balanced C may not be the
+      -- nearest-voltage C. Search band edges and the shortest-travel point
+      -- in the interval that minimizes spread against the fixed A/B pair.
+      local perDegree=basis*M.ratio((angle[1]+a)/s.travelDegrees)*M.ratio((angle[2]+b)/s.travelDegrees)*.989990071137444/s.travelDegrees
+      local low=math.max(lo[3],math.ceil(wanted-s.accuracyVolts/2/perDegree))
+      local high=math.min(hi[3],math.floor(wanted+s.accuracyVolts/2/perDegree))
+      if low<=high then
+        local left=math.max(low,math.min(high,math.min(angle[1]+a,angle[2]+b)-angle[3]))
+        local right=math.max(low,math.min(high,math.max(angle[1]+a,angle[2]+b)-angle[3]))
+        local closest=math.max(left,math.min(right,0))
+        consider(a,b,low); consider(a,b,high)
+        consider(a,b,math.floor(closest)); consider(a,b,math.ceil(closest))
+      end
     end
     rows=rows+1; if rows%8==0 and yieldFn then yieldFn() end
   end

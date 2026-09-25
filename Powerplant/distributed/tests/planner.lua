@@ -23,6 +23,29 @@ for _,p in ipairs(corrected.positions) do output=output*P.ratio(p) end
 check(math.abs(output-2640)<=1,'measured correction did not account for ratio error')
 local impossible=P.initial(s,banks,500,nil,2640)
 check(impossible.err>1,'unreachable target appears reachable')
+-- The former 90/90/70 preset must not win merely because it needs no
+-- movement; choose a tighter cluster while preserving the voltage band.
+local uneven={{position=.9},{position=.9},{position=.7}}
+local target=1500*s.stepUp*P.ratio(.9)^2*P.ratio(.7)
+local balanced=P.initial(s,uneven,1500,nil,target)
+check(balanced.err<=s.accuracyVolts/2 and balanced.spread<20,'startup retained widely separated banks')
+-- Exhaustive independent search on a small travel range, including a wide
+-- acceptable band where the best-balanced C is not nearest the exact target.
+for _,accuracy in ipairs({.1,50,500}) do
+ local small={travelDegrees=12,stepUp=2.5,accuracyVolts=accuracy}
+ local b={{position=.1},{position=.5},{position=.8}}
+ local p=P.initial(small,b,1500,nil,900)
+ local best
+ for a=0,11 do for bb=0,12 do for c=0,11 do
+  local angles={.2+a,bb,.6+c}
+  local output=3750
+  for _,angle in ipairs(angles) do output=output*P.ratio(angle/12) end
+  local err=math.abs(output-900)
+  local spread=math.max(table.unpack(angles))-math.min(table.unpack(angles))
+  if err<=accuracy/2 and (not best or spread<best) then best=spread end
+ end end end
+ if best then check(p.inside and math.abs(p.spread-best)<1e-8,'planner missed most balanced in-band destination') end
+end
 local count,maxError=0,0
 for line in io.lines('Powerplant/distributed/tests/fixtures/variac-calibration.tsv') do
  local angle,input,output=line:match('^(%d+)%s+([%d%.]+)%s+([%d%.]+)')

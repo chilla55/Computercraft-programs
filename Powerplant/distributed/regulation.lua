@@ -145,7 +145,7 @@ function M.new(R)
       local err=math.abs(output-R.state.activeTarget)
       local limit=attempt>1 and (err<=R.state.activeTarget*.02 and 1 or 8) or nil
       local plan=P.initial(s,before,input,attempt>1 and output or nil,R.state.activeTarget,planningYield,limit)
-      if limit==1 and (plan.travel==0 or plan.err>=err-.001) then
+      if limit==1 and (plan.travel==0 or plan.err>=err-.001 or plan.err>s.fallbackVolts) then
         plan=P.initial(s,before,input,output,R.state.activeTarget,planningYield,8)
       end
       assert(attempt>1 or plan.err<=s.fallbackVolts,('Startup target unreachable: predicted %.2f V, target %.2f V'):format(plan.predicted,R.state.activeTarget))
