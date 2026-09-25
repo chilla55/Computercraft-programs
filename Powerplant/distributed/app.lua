@@ -8,6 +8,35 @@ local function prompt(label,default,parse)
   if value=='' then return default end
   return parse and assert(parse(value),'Invalid '..label) or value
 end
+local function installStartup()
+  local existing={}
+  for _,path in ipairs({'/startup','/startup.lua'}) do
+    if fs.exists(path) then existing[#existing+1]=path end
+  end
+  if #existing>0 then
+    print('Existing startup: '..table.concat(existing,', '))
+    print('Autostart needs to replace this. The original files will be backed up, not run alongside this controller.')
+    local answer=prompt('Back up existing startup and enable transformer autostart? yes/no','yes')
+    if answer:lower()~='yes' then print('Startup left unchanged. Start this role manually.'); return end
+  end
+  local program=shell.getRunningProgram()
+  local working=shell.dir()
+  -- Use the stable launcher, so approved updates still take effect after boot.
+  local body='-- Distributed transformer autostart\n'..
+    'shell.setDir('..string.format('%q',working)..')\n'..
+    'shell.run('..string.format('%q','/'..program:gsub('^/',''))..', "run")\n'
+  local f=assert(fs.open('/transformer-startup.tmp','w')); f.write(body); f.close()
+  if #existing>0 then
+    local index=1
+    while fs.exists('/transformer-startup-backup-'..index) do index=index+1 end
+    local backup='/transformer-startup-backup-'..index; fs.makeDir(backup)
+    for _,path in ipairs(existing) do fs.move(path,fs.combine(backup,fs.getName(path))) end
+    print('Previous startup saved in '..backup)
+  end
+  fs.move('/transformer-startup.tmp','/startup.lua')
+  if settings then settings.set('shell.allow_startup',true); settings.save() end
+  print('Autostart enabled: '..node.role..'. Workers still boot stopped; Resume/reset is required to energize.')
+end
 local function configure()
   local role=requestedRole or prompt('Role: master, regulation, protection',node and node.role or 'master')
   assert(role=='master' or role=='regulation' or role=='protection','Unknown role')
@@ -60,18 +89,25 @@ local function configure()
     settings.thermalMaxAgeSeconds=settings.thermalMaxAgeSeconds or 1; settings.thermalGraceSeconds=settings.thermalGraceSeconds or 5; settings.thermalCoolSeconds=settings.thermalCoolSeconds or 5
     local config={schema=1,cluster=cluster,revision=node and node.config.revision+1 or 1,settings=settings,
       ids={master=os.getComputerID(),regulation=discover('regulation'),protection=discover('protection')}}
+    print('Power flow (generator to load):')
+    print('Source -> entry transformer -> stages A/B/C')
+    print('       -> exit transformer -> output breakers -> load')
+    print('Use the exact peripheral names listed below.')
+    print('Enter keeps the default; - clears an optional gauge.')
     print('Detected peripherals:'); for _,name in ipairs(peripheral.getNames()) do print(' '..name..' ['..tostring(peripheral.getType(name))..']') end
     for _,key in ipairs({'inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','plusBreaker','minusBreaker','inputBreakers','gearA','variacsA','gearB','variacsB','gearC','variacsC'}) do
       local old=settings[key]; local list=type(old)=='table'
-      local value=prompt(key..(list and ' (comma-separated names)' or ''),list and table.concat(old,',') or old)
+      local field=assert(U.fields[key],'Missing setup description')
+      print(''); print(field.help)
+      local value=prompt(field.label,list and table.concat(old,',') or old)
       if list then local names={}; for name in value:gmatch('[^,%s]+') do names[#names+1]=name end; settings[key]=names else settings[key]=value=='-' and '' or value end
     end
     print('Operating settings (Enter keeps the shown value):')
     for _,key in ipairs(U.editable) do
       if type(settings[key])=='number' then
-        local label=key=='entryRatio' and 'entryRatio (source volts / regulator input volts)' or
-          key=='stepUp' and 'stepUp (output volts / pre-exit volts)' or key
-        settings[key]=prompt(label,settings[key],tonumber)
+        local field=assert(U.fields[key],'Missing setup description')
+        print(''); print(field.help)
+        settings[key]=prompt(field.label,settings[key],tonumber)
       end
     end
     U.validate(config)
@@ -92,6 +128,7 @@ local function configure()
     node={role=role,modem=modem,autoUpdate=true,config=config}
   end
   U.write('distributed-node.json',node)
+  installStartup()
   print('Saved '..role..'; run transformer.lua run. The old regulator must remain stopped.')
 end
 if command=='configure' then configure(); return end

@@ -1,5 +1,41 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.1',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.2',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
+M.fields={
+  inputGauge={label="Voltage entering variacs",help="Required. Voltage gauge AFTER the entry transformer, BEFORE stage A."},
+  outputGauge={label="Final output voltage",help="Required. Voltage gauge AFTER the exit transformer, on the transformer side of the output breakers."},
+  sourceGauge={label="Generator / source voltage",help="Optional. Voltage gauge BEFORE the entry transformer. Enter - for none."},
+  preStepUpGauge={label="Voltage before exit transformer",help="Optional. Voltage gauge AFTER stage C, BEFORE the exit transformer. Enter - for none."},
+  sourceCurrentGauge={label="Generator / source current",help="Optional. Current gauge BEFORE the entry transformer. Enter - for none."},
+  sourcePowerGauge={label="Generator / source power",help="Optional. Power gauge BEFORE the entry transformer. Enter - for none."},
+  inputBreakers={label="Input isolation breakers",help="Required. Breakers that disconnect the incoming supply for maintenance and homing. List all names separated by commas."},
+  plusBreaker={label="Positive output breaker",help="Required. Breaker on the positive output connection to the bus / load."},
+  minusBreaker={label="Negative output breaker",help="Required. Breaker on the negative output connection to the bus / load."},
+  target={label="Desired output voltage (V)",help="Voltage to maintain at the final output gauge."},
+  entryRatio={label="Entry transformer reduction ratio",help="Source volts divided by volts entering the variacs. Example: 7500 V to 2500 V = 3. Use 1 with no entry transformer."},
+  stepUp={label="Exit transformer voltage multiplier",help="Final output volts divided by volts before the exit transformer. Example: 1000 V to 2500 V = 2.5. Use 1 with no exit transformer."},
+  sourceCurrentTripAmps={label="Source current trip limit (A)",help="Limit at the source current gauge, BEFORE the entry transformer. 0 disables this software current limit. Native breaker protection is unchanged."},
+  travelDegrees={label="Full variac travel (degrees)",help="Shaft rotation needed to move a variac from minimum to maximum."},
+  accuracyVolts={label="Preferred output accuracy (V)",help="Preferred difference from the desired output voltage."},
+  fallbackVolts={label="Acceptable output error (V)",help="Allowed difference if the available variac positions cannot achieve the preferred accuracy. Also checked before output connection."},
+  moveTimeout={label="Drive movement timeout (seconds)",help="Maximum wait for a sequenced gearbox movement to finish."},
+  chargeTimeout={label="Output tuning timeout (seconds)",help="Maximum time to tune the voltage before connecting the output."},
+  positionToleranceDegrees={label="Bank alignment tolerance (degrees)",help="Maximum position spread within one parallel variac bank. Different stages may have different positions."},
+  maxInputVolts={label="Maximum voltage entering variacs (V)",help="Trip limit measured AFTER the entry transformer, BEFORE stage A. This is not the generator voltage or spark-gap setting."},
+  outputTripPercent={label="Output overvoltage trip margin (%)",help="Trip when measured output exceeds the active target by this percentage."},
+  thermalMaxAgeSeconds={label="Temperature reading age limit (seconds)",help="Maximum age of a temperature sample before it is considered stale."},
+  thermalGraceSeconds={label="Overheat curve time scale (seconds)",help="Default 5 allows five seconds in the 125-126 C band. Hotter bands allow less time; 140 C trips immediately."},
+  thermalCoolSeconds={label="Thermal recovery wait (seconds)",help="Required cooling period at or below 125 C for thermal recovery."},
+  rampVoltsPerSecond={label="Target voltage ramp speed (V/s)",help="Maximum speed for changing the active target toward the requested voltage."},
+  maxRampStepVolts={label="Maximum target step (V)",help="Maximum target change in one regulation step."},
+  pollSeconds={label="Regulation check interval (seconds)",help="Delay between regulation cycles. Protection runs independently."},
+  settleSeconds={label="Voltage settling delay (seconds)",help="Wait after a variac movement before checking voltage again."},
+  gearA={label="Stage 1 (A) drive gearbox",help="Required. Sequenced gearbox driving every variac in this stage."},
+  variacsA={label="Stage 1 (A) variacs",help="Required. All parallel variacs driven by this stage gearbox. Separate their peripheral names with commas."},
+  gearB={label="Stage 2 (B) drive gearbox",help="Required. Sequenced gearbox driving every variac in this stage."},
+  variacsB={label="Stage 2 (B) variacs",help="Required. All parallel variacs driven by this stage gearbox. Separate their peripheral names with commas."},
+  gearC={label="Stage 3 (C) drive gearbox",help="Required. Sequenced gearbox driving every variac in this stage."},
+  variacsC={label="Stage 3 (C) variacs",help="Required. All parallel variacs driven by this stage gearbox. Separate their peripheral names with commas."},
+}
 function M.finite(n) return type(n)=='number' and n==n and math.abs(n)<math.huge end
 function M.copy(v) if type(v)~='table' then return v end; local r={} for k,x in pairs(v) do r[k]=M.copy(x) end return r end
 function M.canonical(v)
