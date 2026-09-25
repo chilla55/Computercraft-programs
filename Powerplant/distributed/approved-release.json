@@ -1,11 +1,11 @@
 {
   "files": {
     "app.lua": {
-      "sha256": "09e29a94fa54870652a04871f79a7d4ba15589c29b70c623d97d3c0429206155",
-      "size": 7007
+      "sha256": "f4436de92ed97733a075e96633b09a6489d04298d2d7d6ffab037d2f66d92f0f",
+      "size": 8061
     },
     "common.lua": {
-      "sha256": "77db7b09d8febb1181c5898dcedea045effe606e315863724938399d87bf164c",
+      "sha256": "71b2096a7004e9964bdb239a5836d72cc0299f581930c7e11102601ec24cc8da",
       "size": 7515
     },
     "discovery.lua": {
@@ -53,7 +53,7 @@
       "size": 12182
     }
   },
-  "ref": "distributed-1.1.0",
+  "ref": "distributed-1.1.1",
   "schema": 1,
-  "version": "distributed-1.1.0"
+  "version": "distributed-1.1.1"
 }

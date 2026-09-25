@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.0',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.1',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 function M.finite(n) return type(n)=='number' and n==n and math.abs(n)<math.huge end
 function M.copy(v) if type(v)~='table' then return v end; local r={} for k,x in pairs(v) do r[k]=M.copy(x) end return r end

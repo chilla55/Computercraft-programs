@@ -41,10 +41,19 @@ local function configure()
   end
   if role=='master' then
     local legacy=U.read('dual-variac-config.json')
-    local settings=node and node.config and node.config.settings or legacy
-    assert(settings,'Copy the existing dual-variac-config.json to the master before initial configuration')
-    settings=U.copy(settings)
-    for _,key in ipairs({'A','B','C'}) do if not settings['variacs'..key] then settings['variacs'..key]={settings['variac'..key]} end end
+    local saved=node and node.config and node.config.settings or legacy
+    local settings={target=2640,stepUp=2.5,entryRatio=1,
+      inputGauge='',outputGauge='',sourceGauge='',preStepUpGauge='',
+      sourceCurrentGauge='',sourcePowerGauge='',sourceCurrentTripAmps=0,
+      inputBreakers={},plusBreaker='',minusBreaker='',
+      gearA='',gearB='',gearC='',variacsA={},variacsB={},variacsC={},
+      travelDegrees=315,accuracyVolts=0.1,fallbackVolts=1,moveTimeout=30,chargeTimeout=60,
+      positionToleranceDegrees=1,maxInputVolts=2800,outputTripPercent=10,
+      thermalMaxAgeSeconds=1,thermalGraceSeconds=5,thermalCoolSeconds=5,
+      rampVoltsPerSecond=1,maxRampStepVolts=1,pollSeconds=0.1,settleSeconds=0.2}
+    for key,value in pairs(saved or {}) do settings[key]=U.copy(value) end
+    print(saved and 'Using saved settings as defaults.' or 'New installation: assign components and review operating settings.')
+    for _,key in ipairs({'A','B','C'}) do if #settings['variacs'..key]==0 and settings['variac'..key] then settings['variacs'..key]={settings['variac'..key]} end end
     settings.inputBreakers=settings.inputBreakers or {}
     settings.entryRatio=settings.entryRatio or 1; settings.sourceGauge=settings.sourceGauge or ''; settings.preStepUpGauge=settings.preStepUpGauge or ''
     settings.sourceCurrentGauge=settings.sourceCurrentGauge or ''; settings.sourcePowerGauge=settings.sourcePowerGauge or ''; settings.sourceCurrentTripAmps=settings.sourceCurrentTripAmps or 0
@@ -57,7 +66,14 @@ local function configure()
       local value=prompt(key..(list and ' (comma-separated names)' or ''),list and table.concat(old,',') or old)
       if list then local names={}; for name in value:gmatch('[^,%s]+') do names[#names+1]=name end; settings[key]=names else settings[key]=value=='-' and '' or value end
     end
-    settings.target=prompt('Nominal output volts',settings.target,tonumber)
+    print('Operating settings (Enter keeps the shown value):')
+    for _,key in ipairs(U.editable) do
+      if type(settings[key])=='number' then
+        local label=key=='entryRatio' and 'entryRatio (source volts / regulator input volts)' or
+          key=='stepUp' and 'stepUp (output volts / pre-exit volts)' or key
+        settings[key]=prompt(label,settings[key],tonumber)
+      end
+    end
     U.validate(config)
     assert(U.isolated(settings) and U.idle(settings),'Open input/output breakers and wait for drives before commissioning')
     node={role=role,modem=modem,uplinkModem=uplink,monitor=monitor,autoUpdate=true,config=config}

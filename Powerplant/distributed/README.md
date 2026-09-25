@@ -27,7 +27,7 @@ install-transformer.lua
 
 The installer creates `transformer/` and verifies every file against the GitHub release manifest. It does not replace an existing installation or alter startup scripts. HTTP must be enabled and GitHub accessible. Alternatively, copy all top-level `.lua` files from this directory into `transformer/` using a disk.
 
-Leave your existing `dual-variac-config.json` in the **UI computer's root**. The initial master wizard imports that configuration, displays available peripherals and lets you assign the gauges, bank members, drives and input/output breakers. Enter keeps the saved default. An input breaker is mandatory. All contacts must be open and drives idle during commissioning. Use a unique cluster name for each transformer. Start the configuration wizard on all three computers together, selecting that same name. Each advertises its role over wired rednet; the master discovers the workers and the workers discover the master. IDs are saved after commissioning; runtime does not silently replace a missing worker with another ID.
+No existing configuration file is required. The master wizard starts with operating defaults, displays available peripherals and asks you to assign the gauges, bank members, drives and input/output breakers. It also prompts for the entry/exit ratios, target voltage and operating limits. If an existing `distributed-node.json` or legacy `dual-variac-config.json` is present in the UI computer's root, its settings supply the defaults. Enter keeps the shown value. Peripheral assignments are left blank on a fresh install and must be supplied before validation succeeds. An input breaker is mandatory. All contacts must be open and drives idle during commissioning. Use a unique cluster name for each transformer. Start the configuration wizard on all three computers together, selecting that same name. Each advertises its role over wired rednet; the master discovers the workers and the workers discover the master. IDs are saved after commissioning; runtime does not silently replace a missing worker with another ID.
 
 On the UI computer:
 
@@ -113,6 +113,7 @@ lua Powerplant/distributed/tests/updates.lua
 lua Powerplant/distributed/tests/integration.lua
 lua Powerplant/distributed/tests/ui.lua
 lua Powerplant/distributed/tests/discovery.lua
+lua Powerplant/distributed/tests/configure.lua
 ```
 
 The integration fixture runs all three roles in separate Lua environments, with shared simulated peripherals, yielding native calls and CC-style event routing. It covers isolated bank homing, protection-only closure, UI loss, a hot follower, reset/restart, unknown contact opening and heartbeat loss even while hello messages still arrive. It does not model Minecraft's electrical or thermal physics.
