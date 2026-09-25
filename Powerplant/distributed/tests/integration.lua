@@ -14,6 +14,7 @@ local function world(restore,thermalFault,options)
   options=options or {}
   local cfg=U.copy(cfg); local settings=cfg.settings
   if options.multiInput then settings.inputBreakers={'input','input2'} end
+  if options.ignoreSmallMoves then settings.positionToleranceDegrees=2 end
   local W={time=0,nodes={},contacts={input=false,plus=false,minus=false},positions={a1=.8,a2=.5,b1=.9,c1=.98},temperature={},motion={},moves={},closes={},drop={}}
   if options.multiInput then W.contacts.input2=false end
   if options.lowStart then for name in pairs(W.positions) do W.positions[name]=.05 end end
@@ -81,7 +82,7 @@ local function world(restore,thermalFault,options)
         end
         if N.R.state.startupPlan then W.maxStartupAttempt=math.max(W.maxStartupAttempt or 0,N.R.state.startupPlan.attempt) end
         for _,name in ipairs(settings['variacs'..key]) do
-          if name~=W.jammed then W.motion[name]={from=W.positions[name],to=math.max(0,math.min(1,W.positions[name]+degrees*direction/315)),start=W.time,finish=W.time+(N.R.state.phase=='positioning' and options.startupMoveTime or .15)} end
+          if name~=W.jammed and not (options.ignoreSmallMoves and N.R.state.phase=='fine_tuning' and degrees<=2) then W.motion[name]={from=W.positions[name],to=math.max(0,math.min(1,W.positions[name]+degrees*direction/315)),start=W.time,finish=W.time+(N.R.state.phase=='positioning' and options.startupMoveTime or .15)} end
         end
       end} end
     devices.vin={voltage=function()
@@ -223,6 +224,26 @@ local corrected=world(nil,nil,{lowStart=true,voltageScale=.95})
 corrected.untilTrue(function() return corrected.nodes[3].R.fresh('regulation')~=nil end,3); corrected.command('start')
 check(corrected.untilTrue(function() return corrected.nodes[2].R.state.phase=='live' end,60),'measured voltage correction failed')
 check(corrected.maxStartupAttempt==2,'startup correction was not a bounded recalculation')
+local fine=world(nil,nil,{lowStart=true,voltageScale=.999})
+fine.untilTrue(function() return fine.nodes[3].R.fresh('regulation')~=nil end,3); fine.command('start')
+check(fine.untilTrue(function() return fine.nodes[2].R.state.phase=='live' end,60),'coarse-to-live-feedback startup did not converge')
+local sawFine=false
+for _,sample in ipairs(fine.nodes[2].R.state.startupMeasurements) do
+ if sample.mode=='fine' then sawFine=true; check(math.abs(sample.outputBefore-sample.target)<=10,'fine mode entered outside 10V band') end
+end
+check(sawFine,'startup did not switch to fine feedback inside 10V')
+for _,move in ipairs(fine.moves) do if move.phase=='fine_tuning' then check(move.degrees<=16,'fine movement exceeded live algorithm limit') end end
+local lost=world(nil,nil,{lowStart=true,voltageScale=.999,ignoreSmallMoves=true})
+lost.untilTrue(function() return lost.nodes[3].R.fresh('regulation')~=nil end,3); lost.command('start')
+check(lost.untilTrue(function() return lost.nodes[2].R.state.phase=='tripped' end,60),'lost small command passed movement tolerance')
+lost.untilTrue(function() return false end,.5)
+local lostReason=false
+for _,event in ipairs(lost.nodes[2].R.events) do
+ if event.code=='variac_stuck' and event.reason:find('no movement in commanded direction',1,true) then
+  lostReason=event.detail and #event.detail.startupMeasurements>0
+ end
+end
+check(lostReason and not lost.contacts.plus and not lost.contacts.minus,'missing per-stage no-motion diagnostic or output connected')
 local transient=world(nil,nil,{lowStart=true,voltageScale=.95,transientInBand=true})
 transient.untilTrue(function() return transient.nodes[3].R.fresh('regulation')~=nil end,3); transient.command('start')
 check(transient.untilTrue(function() return transient.nodes[2].R.state.phase=='live' end,60),'single transient acceptable reading prevented startup correction')
@@ -240,6 +261,15 @@ diverging.untilTrue(function() return false end,.5)
 local historyReason=false
 for _,event in ipairs(diverging.nodes[2].R.events) do if event.reason and event.reason:find('output history',1,true) then historyReason=true end end
 check(historyReason,'nonconverging startup did not record voltage history')
+local diagnostic
+for _,event in ipairs(diverging.nodes[2].R.events) do
+ if event.detail and event.detail.startupMeasurements then diagnostic=event.detail.startupMeasurements end
+end
+check(diagnostic and #diagnostic==12,'startup measurement detail was not attached to trip')
+for _,sample in ipairs(diagnostic) do
+ check(sample.outputBefore and sample.output and sample.input and sample.predicted,'missing electrical prediction diagnostic')
+ for _,bank in ipairs(sample.banks) do check(bank.beforeDegrees and bank.commandDegrees and bank.targetDegrees and bank.actualDegrees,'missing movement diagnostic') end
+end
 -- An opening between the contact snapshot and gauge read is a contact fault,
 -- while genuinely low voltage with closed contacts still trips.
 direct.openOnInputRead=true
