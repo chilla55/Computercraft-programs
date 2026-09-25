@@ -68,4 +68,6 @@ for _,role in ipairs({'regulation','protection'}) do
  local worker,savedWorker,_,why,boot=run(node,nil,{},nil,role)
  check(worker and savedWorker.role==role and boot['/startup.lua'],'worker autostart failed: '..tostring(why))
 end
+local zero,zeroNode=run(custom,nil,{positionToleranceDegrees='0'})
+check(zero and zeroNode.config.settings.positionToleranceDegrees==0,'zero movement tolerance rejected')
 print(('PASS: %d commissioning checks'):format(count))

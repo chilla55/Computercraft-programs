@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.3',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.4',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 M.fields={
   inputGauge={label="Voltage entering variacs",help="Required. Voltage gauge AFTER the entry transformer, BEFORE stage A."},
@@ -19,7 +19,7 @@ M.fields={
   fallbackVolts={label="Acceptable output error (V)",help="Allowed difference if the available variac positions cannot achieve the preferred accuracy. Also checked before output connection."},
   moveTimeout={label="Drive movement timeout (seconds)",help="Maximum wait for a sequenced gearbox movement to finish."},
   chargeTimeout={label="Output tuning timeout (seconds)",help="Maximum time to tune the voltage before connecting the output."},
-  positionToleranceDegrees={label="Bank alignment tolerance (degrees)",help="Maximum position spread within one parallel variac bank. Different stages may have different positions."},
+  positionToleranceDegrees={label="Movement verification tolerance (degrees)",help="Allowed difference between commanded and measured travel. This does NOT allow spread within a parallel bank: those positions must match exactly. Different stages may use different positions."},
   maxInputVolts={label="Maximum voltage entering variacs (V)",help="Trip limit measured AFTER the entry transformer, BEFORE stage A. This is not the generator voltage or spark-gap setting."},
   outputTripPercent={label="Output overvoltage trip margin (%)",help="Trip when measured output exceeds the active target by this percentage."},
   thermalMaxAgeSeconds={label="Temperature reading age limit (seconds)",help="Maximum age of a temperature sample before it is considered stale."},
@@ -74,9 +74,10 @@ function M.validate(c)
   local ids={}; for _,role in ipairs(M.roles) do local id=c.ids[role]; assert(M.finite(id) and id>=0 and id%1==0 and not ids[id],'Unique computer IDs required'); ids[id]=true end
   assert(type(c.revision)=='number' and c.revision>=1 and c.revision%1==0,'Invalid configuration revision')
   local s=assert(c.settings,'Missing transformer settings')
-  for _,key in ipairs({'target','stepUp','entryRatio','travelDegrees','maxInputVolts','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','outputTripPercent'}) do
+  for _,key in ipairs({'target','stepUp','entryRatio','travelDegrees','maxInputVolts','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','outputTripPercent'}) do
     assert(M.finite(s[key]) and s[key]>0,'Invalid '..key)
   end
+  assert(M.finite(s.positionToleranceDegrees) and s.positionToleranceDegrees>=0,'Invalid movement verification tolerance')
   assert(s.target/(s.stepUp*.99999^3)<s.maxInputVolts,'Target exceeds input range')
   assert(s.fallbackVolts>=s.accuracyVolts and s.outputTripPercent<100,'Invalid voltage tolerance')
   assert(type(s.inputBreakers)=='table' and #s.inputBreakers>0,'Input isolation breakers required')
@@ -125,7 +126,7 @@ function M.positions(s)
       bank.members[#bank.members+1]={name=name,position=v.position}; bank.low=math.min(bank.low,v.position); bank.high=math.max(bank.high,v.position)
     end
     bank.position=bank.members[1].position
-    bank.aligned=(bank.high-bank.low)*s.travelDegrees<=s.positionToleranceDegrees
+    bank.aligned=bank.high==bank.low -- Parallel members must report identical positions.
   end
   return banks
 end

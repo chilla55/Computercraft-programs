@@ -25,7 +25,7 @@ wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powe
 install-transformer.lua
 ```
 
-To select an exact release, use `install-transformer.lua transformer distributed-1.1.3` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
+To select an exact release, use `install-transformer.lua transformer distributed-1.1.4` with the current installer. The optional second argument reads the manifest from that immutable tag and rejects a different version. Without it, the installer checks the latest manifest using a timestamped URL to avoid stale caches. Choose an unused folder; existing installations are never overwritten.
 
 The default installation folder is `transformer/`, which holds the original fallback and stable launcher and verifies every file against the GitHub release manifest. It does not replace an existing installation or alter startup scripts. HTTP must be enabled and GitHub accessible. Alternatively, copy all top-level `.lua` files from this directory into `transformer/` using a disk.
 
@@ -65,7 +65,7 @@ Use **Resume/reset** on the UI or protection computer once temperatures are fres
 5. Requests output connection; protection independently checks readiness and measured output voltage.
 6. Regulates using bounded target ramps while protection continues independently.
 
-A jammed member, inconsistent bank, unavailable sensor, missing worker, or unexpected breaker opening latches the installation off. A later Resume/reset starts a fresh alignment/tuning sequence. Series stages A/B/C may have different positions; members within a parallel bank must stay aligned.
+A jammed member, inconsistent bank, unavailable sensor, missing worker, or unexpected breaker opening latches the installation off. A later Resume/reset starts a fresh alignment/tuning sequence. Series stages A/B/C may have different positions; members within a parallel bank must report exactly matching positions. Any reported spread fails the alignment check, independently of the movement verification tolerance. That separate setting only compares measured travel with the commanded destination; its internal configuration key remains `positionToleranceDegrees` for compatibility.
 
 This first distributed release uses local single-mode regulation. The older plant-wide controller's optional grid-joining/generator-transition protocol is not connected to this new cluster yet. Do not use a plant-wide enable command as a substitute for its local reset/start handshake.
 
@@ -122,6 +122,7 @@ lua Powerplant/distributed/tests/discovery.lua
 lua Powerplant/distributed/tests/configure.lua
 lua Powerplant/distributed/tests/install.lua
 lua Powerplant/distributed/tests/config_storage.lua
+lua Powerplant/distributed/tests/alignment.lua
 ```
 
 The integration fixture runs all three roles in separate Lua environments, with shared simulated peripherals, yielding native calls and CC-style event routing. It covers isolated bank homing, protection-only closure, UI loss, a hot follower, reset/restart, unknown contact opening and heartbeat loss even while hello messages still arrive, automatic restart from persisted running state without the UI, and refusal to automatically clear stopped or thermal-tripped states. It does not model Minecraft's electrical or thermal physics.

@@ -72,7 +72,7 @@ function M.new(R)
           local before=U.positions(s)[i]; local after=move(i,math.abs(plan[i]),sign*directions[i],false)
           for j,member in ipairs(after.members) do
             local expected=math.max(0,math.min(1,before.members[j].position+plan[i]/s.travelDegrees))
-            assert(math.abs(member.position-expected)*s.travelDegrees<=s.positionToleranceDegrees,'variac_stuck: stage '..i..' '..member.name)
+            assert(math.abs(member.position-expected)*s.travelDegrees<=s.positionToleranceDegrees+1e-9,'variac_stuck: stage '..i..' '..member.name)
           end
         end
       end

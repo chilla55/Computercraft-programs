@@ -153,6 +153,8 @@ local previouslyRunning={regulation={events={},latched=false,runRequested=true},
 local resumed=world(previouslyRunning); resumed.drop.master=true
 check(resumed.untilTrue(function() return resumed.nodes[2].R.state.phase=='live' end,150),'previously running workers failed automatic startup without UI')
 check(resumed.contacts.input and resumed.contacts.plus and resumed.contacts.minus,'automatic startup did not connect')
+resumed.positions.a2=resumed.positions.a1+0.000001
+check(resumed.untilTrue(function() return not resumed.contacts.input and not resumed.contacts.plus and not resumed.contacts.minus end,2),'small live bank spread did not trip')
 local stopped=world({regulation={events={},latched=true,runRequested=false},protection={events={},latched=true,runRequested=false}})
 stopped.untilTrue(function() return false end,3)
 check(not stopped.contacts.input and #stopped.closes==0,'maintenance reboot reconnected')
