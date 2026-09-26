@@ -1,7 +1,7 @@
--- stock-monitor-version: 1.0.7
+-- stock-monitor-version: 1.0.8
 -- Create Stock Ticker + Item Vault dashboard for CC: Tweaked.
 -- Run stock_monitor --configure to choose peripherals again.
-local M = { version = "1.0.7" }
+local M = { version = "1.0.8" }
 
 local function number(value, label)
     assert(type(value) == "number" and value >= 0 and value < math.huge
@@ -325,7 +325,56 @@ function M.isViewTouch(w, h, x, y, trendView)
     return type(x) == "number" and y == row and x >= left and x < left + #label
 end
 
-function M.draw(target, data, problem, trendView)
+function M.listLayout(w, h, trendView)
+    local top = trendView and 3 or (h >= 15 and 9 or (h >= 11 and 7 or nil))
+    local column = math.max(7, math.min(14, math.floor(w / 4)))
+    return top, top and h - top - 3 or 0, column, w - 2 * column - 2
+end
+
+function M.listPages(w, h, trendView, data)
+    local _, rows = M.listLayout(w, h, trendView)
+    local trend = data and data.trend
+    if rows < 1 or not trend or not trend.changes then return 1 end
+    return math.max(1, math.ceil(#trend.changes / rows))
+end
+
+function M.sortedChanges(changes, state)
+    local result = {}
+    for i, item in ipairs(changes) do result[i] = item end
+    local key = state.sort or "five"
+    table.sort(result, function(a, b)
+        if a[key] == b[key] then return a.name < b.name end
+        if state.descending == false then return a[key] < b[key] end
+        return a[key] > b[key]
+    end)
+    return result
+end
+
+function M.listAction(state, action, pages)
+    state.page = math.max(0, math.min(state.page or 0, pages - 1))
+    if action == "previous" then state.page = math.max(0, state.page - 1)
+    elseif action == "next" then state.page = math.min(pages - 1, state.page + 1)
+    elseif action == "minute" or action == "five" then
+        if (state.sort or "five") == action then state.descending = state.descending == false
+        else state.sort, state.descending = action, true end
+        state.page = 0
+    end
+end
+
+function M.touchAction(w, h, x, y, trendView)
+    if w < 26 or h < 10 or type(x) ~= "number" or type(y) ~= "number" then return nil end
+    if M.isViewTouch(w, h, x, y, trendView) then return "view" end
+    if y == h and x >= 1 and x <= 3 then return "previous" end
+    if y == h and x >= w - 2 and x <= w then return "next" end
+    local top, rows, column, nameWidth = M.listLayout(w, h, trendView)
+    if top and rows > 0 and y == top + 1 then
+        if x >= nameWidth + 2 and x <= nameWidth + 1 + column then return "minute" end
+        if x >= w - column + 1 and x <= w then return "five" end
+    end
+end
+
+function M.draw(target, data, problem, trendView, listState)
+    listState = listState or { page = data and data.trendPage or 0, sort = "five", descending = true }
     local w, h = target.getSize()
     target.setBackgroundColor(colors.black)
     target.setTextColor(colors.white)
@@ -338,7 +387,13 @@ function M.draw(target, data, problem, trendView)
     end
     local function viewButton()
         local x, y, label = M.viewButton(w, h, trendView)
-        line(y, string.rep(" ", x - 1) .. label, colors.cyan)
+        local pages = M.listPages(w, h, trendView, data)
+        listState.page = math.max(0, math.min(listState.page or 0, pages - 1))
+        line(y, "[<]", listState.page > 0 and colors.cyan or colors.gray)
+        target.setCursorPos(x, y); target.setTextColor(colors.cyan); target.write(label)
+        target.setCursorPos(w - 2, y)
+        target.setTextColor(listState.page < pages - 1 and colors.cyan or colors.gray)
+        target.write("[>]")
     end
     if w < 26 or h < 10 then
         line(1, "Display too small")
@@ -365,8 +420,7 @@ function M.draw(target, data, problem, trendView)
         elseif trend.elapsed == 0 then
             line(top + 1, "Waiting for next snapshot", colors.lightGray)
         else
-            local column = math.max(7, math.min(14, math.floor(w / 4)))
-            local nameWidth = w - 2 * column - 2
+            local _, _, column, nameWidth = M.listLayout(w, h, trendView)
             local function row(y, name, minute, five, minuteColor, fiveColor)
                 line(y, name:sub(1, nameWidth)
                     .. string.rep(" ", math.max(0, nameWidth - #name))
@@ -379,13 +433,18 @@ function M.draw(target, data, problem, trendView)
                     target.setTextColor(fiveColor); target.write(five)
                 end
             end
-            local function duration(seconds, full, label)
-                return seconds < full and (math.floor(seconds) .. "s") or label
+            local function sortLabel(key, label)
+                if (listState.sort or "five") == key then
+                    return "[" .. label .. (listState.descending == false and " ^]" or " v]")
+                end
+                return "[" .. label .. "]"
             end
-            row(top + 1, "ITEM", duration(trend.minuteElapsed, 60, "1 min"), duration(trend.elapsed, 300, "5 min"))
+            row(top + 1, "ITEM", sortLabel("minute", "1m"), sortLabel("five", "5m"))
             local rows = h - top - 3
-            local pages = math.max(1, math.ceil(#trend.changes / rows))
-            local page = (data.trendPage or 0) % pages
+            local entries = M.sortedChanges(trend.changes, listState)
+            local pages = math.max(1, math.ceil(#entries / rows))
+            listState.page = math.max(0, math.min(listState.page or 0, pages - 1))
+            local page = listState.page
             local function signed(value)
                 if value == 0 then return "0" end
                 local sign, magnitude = value > 0 and "+" or "-", math.abs(value)
@@ -403,7 +462,7 @@ function M.draw(target, data, problem, trendView)
             end
             if #trend.changes == 0 then line(top + 2, "No net changes", colors.lightGray) end
             for index = 1, rows do
-                local item = trend.changes[page * rows + index]
+                local item = entries[page * rows + index]
                 if not item then break end
                 local name = item.name
                 if #name > nameWidth then name = name:gsub("^[^:]+:", "") end
@@ -441,19 +500,20 @@ function M.draw(target, data, problem, trendView)
     local color = data.ratio >= 0.9 and colors.red
         or data.ratio >= 0.75 and colors.orange or colors.lime
     local filled = math.floor(math.max(0, math.min(1, data.ratio)) * (w - 2))
-    line(6, "[" .. string.rep("#", filled) .. string.rep("-", w - 2 - filled) .. "]", color)
+    line(5, "[" .. string.rep("#", filled) .. string.rep("-", w - 2 - filled) .. "]", color)
     local percentage = string.format("%.1f%% full", data.ratio * 100)
-    line(7, string.rep(" ", math.max(0, math.floor((w - #percentage) / 2))) .. percentage, color)
-    line(8, "Slots used: " .. M.format(data.occupied) .. "/" .. M.format(data.slots))
-    line(9, "Max assumes full-size stacks", colors.lightGray)
+    line(6, string.rep(" ", math.max(0, math.floor((w - #percentage) / 2))) .. percentage, color)
+    line(7, "Slots used: " .. M.format(data.occupied) .. "/" .. M.format(data.slots))
     if data.current > data.capacity then
-        line(10, "Count exceeds capacity; retrying", colors.orange)
+        line(8, "Count exceeds capacity; retrying", colors.orange)
     elseif data.historyError then
-        line(10, "History save failed", colors.orange)
+        line(8, "History save failed", colors.orange)
     elseif data.networkError then
-        line(10, "Ticker unavailable", colors.orange)
+        line(8, "Ticker unavailable", colors.orange)
+    else
+        line(8, "Max assumes full-size stacks", colors.lightGray)
     end
-    if h >= 15 then changes(11) else viewButton() end
+    if h >= 15 then changes(9) else viewButton() end
 end
 
 function M.terminalHeading(target, title)
@@ -593,13 +653,18 @@ function M.main(args, services)
     local historyPath = program .. ".history"
     local history = M.loadHistory(historyPath, config, os.epoch("utc") / 1000)
     local trendView, revision = false, 0
+    local listStates = {
+        summary = { page = 0, sort = "five", descending = true },
+        changes = { page = 0, sort = "five", descending = true },
+    }
+    local function listState() return listStates[trendView and "changes" or "summary"] end
     local capacityCache = {}
     local lastData, lastProblem, displayError
     local scanStatus = "Starting first scan..."
     local function notify() os.queueEvent("stock_monitor_display") end
     local function draw(target)
         if not lastData and not lastProblem then M.loading(target, scanStatus)
-        else M.draw(target, lastData, lastProblem, trendView) end
+        else M.draw(target, lastData, lastProblem, trendView, listState()) end
     end
     local function storageTask()
         while true do
@@ -625,7 +690,6 @@ function M.main(args, services)
                     result.historyError = services.historyError
                     result.trend = trend
                     result.trendSource = config.ticker and "stock network" or "selected vaults"
-                    result.trendPage = math.floor(now / 10)
                 else
                     capacityCache = {}
                 end
@@ -664,8 +728,10 @@ function M.main(args, services)
                 if event == "monitor_touch" and name == config.monitor
                     and lastData and not lastProblem and target then
                     local sized, w, h = pcall(target.getSize)
-                    if sized and M.isViewTouch(w, h, x, y, trendView) then
-                        trendView = not trendView
+                    local action = sized and M.touchAction(w, h, x, y, trendView)
+                    if action then
+                        if action == "view" then trendView = not trendView
+                        else M.listAction(listState(), action, M.listPages(w, h, trendView, lastData)) end
                         notify()
                         break
                     end

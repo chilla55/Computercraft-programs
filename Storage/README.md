@@ -59,9 +59,19 @@ mode when the monitor is disconnected):
 - **Q:** stop both the dashboard and updater.
 
 On the monitor, tap **Show changes** or **Show summary** in the bottom row to
-switch views. Only taps within the button on the selected monitor are handled.
-The monitor shows no keyboard shortcuts; configuration, updates, and quit controls
-remain on the computer terminal. Fill percentage appears only below the gauge.
+switch views. Tap **[<]** or **[>]** at the bottom corners for the previous or next
+page; unavailable directions are dimmed. Tap the **[1m]** or **[5m]** column header
+to sort that window. Tapping the selected header again reverses the order:
+**v** means largest gains first, **^** means largest losses first. Both views have
+these controls and retain their own page and sort selection while running.
+Changing the sort returns that view to page one. Refreshes keep the selected
+page, clamping it if the list gets shorter; pages no longer rotate automatically.
+
+Only taps within controls on the selected monitor are handled. The monitor shows
+no keyboard shortcuts; configuration, updates, and quit controls remain on the
+computer terminal. Fill percentage appears only below the gauge. The overview
+places the gauge directly after capacity and removes unused rows above the
+net-change table.
 
 You can also run `storage/start.lua --run --configure` or
 `storage/start.lua --run --list` for configuration or peripheral diagnostics.
@@ -88,7 +98,7 @@ this method, choose 0 for the ticker to use the vault display alone.
 Vaults must expose `size()`, `list()`, and `getItemLimit()`.
 A **3-block-wide by 2-block-high monitor** is supported: the program uses a compact
 layout so totals, the capacity gauge, and net changes appear together.
-Long change lists automatically cycle pages. Monitor text scale stays at 1.0 (twice the original text size);
+Long change lists use manual previous/next page buttons. Monitor text scale stays at 1.0 (twice the original text size);
 it is not toggled on redraw. Layout uses the actual character dimensions
 reported by the monitor. The minimum is 26 columns by 10 rows.
 Storage reads, monitor drawing, and terminal input run as three independent
@@ -139,8 +149,8 @@ and [CC: Tweaked inventory](https://tweaked.cc/generic_peripheral/inventory.html
 
 The **NET CHANGE / 1 MIN + 5 MIN** table shows a signed item-count change for
 both windows. Gains are green with `+`, losses red with `-`, and unchanged values
-show `0`. Items appear if either window changed, ordered by the largest absolute
-change across the two windows. Newly appearing items start from zero; items that
+show `0`. Items appear if either window changed. Each view initially sorts by
+five-minute change, largest gains first; tap a column header to change the order. Newly appearing items start from zero; items that
 disappear completely end at zero.
 
 For example, iron can show **+20** over one minute and **-240** over five minutes.
@@ -150,9 +160,8 @@ between snapshots in that window: production and consumption offset each other.
 It does not measure gross production or consumption.
 
 Changes appear from the second snapshot onward. Until enough history exists,
-each column uses the oldest available snapshot and labels the shorter duration,
-such as `30s` instead of `1 min` or `5 min`. The footer shows the actual duration
-of both windows; sampling intervals can make mature windows slightly longer than
+each column uses the oldest available snapshot. The footer shows the actual
+duration of both windows, such as `1m:30s 5m:30s` during startup; sampling intervals can make mature windows slightly longer than
 60/300 seconds. Large values use compact `k`, `M`, `B`, or `T` notation as needed.
 
 Trends use the Stock Ticker's entire network when configured, otherwise the
@@ -183,9 +192,9 @@ fails. A failed ticker never silently switches the trend to vault-only data.
 
 Screens with 11–14 rows use a compact overview with the changes table below the
 gauge. Screens with at least 15 rows also show slot usage and the capacity note. Tap **Show changes** on the monitor (or press **N** on the computer)
-for a full-screen table. Long lists cycle pages every
-roughly 10 seconds, advancing on refresh. Missing data and the initial wait for
-a second snapshot are labeled explicitly.
+for a full-screen table. Use the bottom corner buttons to page through long
+lists. Missing data and the initial wait for a second snapshot are labeled
+explicitly.
 
 ## Local checks
 

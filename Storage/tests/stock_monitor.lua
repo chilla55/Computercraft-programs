@@ -51,9 +51,9 @@ for _,size in ipairs({{51,19},{26,10},{7,5}}) do
             occupied=1,slots=2,network=current})
         if size[1]>=26 then
             local percentage=string.format('%.1f%% full',current)
-            eq(lines[7],string.rep(' ',math.floor((size[1]-#percentage)/2))..percentage)
-            if current==0 then assert(not lines[6]:find('#')) end
-            if current>=100 then assert(not lines[6]:find('-',1,true)) end
+            eq(lines[6],string.rep(' ',math.floor((size[1]-#percentage)/2))..percentage)
+            if current==0 then assert(not lines[5]:find('#')) end
+            if current>=100 then assert(not lines[5]:find('-',1,true)) end
         end
     end
     m.draw(target,nil,'Vault offline: a')
@@ -117,12 +117,12 @@ for _,size in ipairs({{51,19},{26,15},{26,10}}) do
     assert(lines[size[2]-1]:find('| 2/',1,true))
     data.trendPage=0
     m.draw(target,data,nil,false)
-    if size[2]>=15 then eq(lines[11],'NET CHANGE / 1 MIN + 5 MIN') end
+    if size[2]>=15 then eq(lines[9],'NET CHANGE / 1 MIN + 5 MIN') end
 end
 local target,lines=screen(26,10)
 data.trend={minuteElapsed=30,elapsed=30,changes={{name='iron',minute=5,five=5}}}
 m.draw(target,data,nil,true)
-assert(lines[4]:find('30s',1,true)); assert(lines[5]:find('+5',1,true))
+assert(lines[9]:find('1m:30s 5m:30s',1,true)); assert(lines[5]:find('+5',1,true))
 data.trend={elapsed=0,minuteElapsed=0,changes={}}
 m.draw(target,data,nil,true); eq(lines[4],'Waiting for next snapshot')
 data.trend={elapsed=300,minuteElapsed=60,changes={}}
@@ -200,9 +200,9 @@ eq(compactLines[2],'Non-vault: ~1,000')
 eq(compactLines[3],'Vault items: 5,000')
 eq(compactLines[4],'Vault max: 10,000')
 eq(compactLines[6],string.rep(' ',9)..'50.0% full')
-assert(compactLines[8]:find('1 min',1,true)); assert(compactLines[8]:find('5 min',1,true))
-assert(compactLines[9]:find('iron_ingot',1,true)); assert(compactLines[9]:find('+10',1,true))
-assert(compactLines[9]:find('-100',1,true)); assert(compactLines[11]:find('1/2',1,true))
+assert(compactLines[8]:find('[1m]',1,true)); assert(compactLines[8]:find('[5m v]',1,true))
+assert(compactLines[9]:find('gold_ingot',1,true)); assert(compactLines[9]:find('-5',1,true))
+assert(compactLines[9]:find('+50',1,true)); assert(compactLines[11]:find('1/2',1,true))
 print('Doubled text scale and compact 3x2 dashboard checks passed')
 
 -- Never present unmatched vault/network scopes as a non-vault count.
@@ -248,7 +248,7 @@ for _,dimensions in ipairs({{29,12},{51,19},{26,10}}) do
             eq(percentages,1)
         end
         local x,y,label=m.viewButton(w,h,view)
-        eq(rows[h]:sub(x),label)
+        eq(rows[h]:sub(x,x+#label-1),label)
         assert(m.isViewTouch(w,h,x,y,view))
         assert(m.isViewTouch(w,h,x+#label-1,y,view))
         assert(not m.isViewTouch(w,h,x-1,y,view))
@@ -261,3 +261,48 @@ for _,dimensions in ipairs({{29,12},{51,19},{26,10}}) do
     end
 end
 print('Touch footer bounds and monitor without keyboard hints or duplicate percentage passed')
+
+-- Both layouts use the same geometry for visible buttons and touch hitboxes.
+local sampleEntries={
+    {name='iron',minute=-20,five=10},
+    {name='gold',minute=40,five=-5},
+    {name='copper',minute=5,five=100},
+}
+local state={page=0,sort='five',descending=true}
+eq(m.sortedChanges(sampleEntries,state)[1].name,'copper')
+m.listAction(state,'minute',3)
+eq(state.page,0); eq(m.sortedChanges(sampleEntries,state)[1].name,'gold')
+m.listAction(state,'minute',3)
+eq(state.descending,false); eq(m.sortedChanges(sampleEntries,state)[1].name,'iron')
+m.listAction(state,'next',3); eq(state.page,1)
+m.listAction(state,'next',3); m.listAction(state,'next',3); eq(state.page,2)
+m.listAction(state,'previous',3); eq(state.page,1)
+m.listAction(state,'five',3); eq(state.page,0); eq(state.descending,true)
+m.listAction(state,'previous',3); eq(state.page,0)
+state.page=9; m.listAction(state,'next',1); eq(state.page,0)
+eq(sampleEntries[1].name,'iron') -- sorting does not mutate the sampled data
+for _,dims in ipairs({{29,12},{51,19}}) do
+    local w,h=dims[1],dims[2]
+    for _,view in ipairs({false,true}) do
+        local top,rows,column,nameWidth=m.listLayout(w,h,view)
+        eq(m.touchAction(w,h,1,h,view),'previous')
+        eq(m.touchAction(w,h,w,h,view),'next')
+        eq(m.touchAction(w,h,nameWidth+2,top+1,view),'minute')
+        eq(m.touchAction(w,h,w,top+1,view),'five')
+        eq(m.touchAction(w,h,1,top+2,view),nil)
+        local ui={page=1,sort='minute',descending=false}
+        local entries={}
+        for i=1,30 do entries[i]={name='item_'..i,minute=i,five=-i} end
+        local reading={current=5,capacity=100,ratio=0.05,occupied=1,slots=2,
+            trend={elapsed=300,minuteElapsed=60,changes=entries}}
+        local display,lines=screen(w,h)
+        m.draw(display,reading,nil,view,ui)
+        assert(lines[top+1]:find('[1m ^]',1,true))
+        assert(lines[h]:find('[<]',1,true)); assert(lines[h]:find('[>]',1,true))
+        assert(lines[h-1]:find('| 2/',1,true))
+        m.draw(display,reading,nil,view,ui); eq(ui.page,1) -- refresh retains page
+        reading.trend.changes={entries[1]}
+        m.draw(display,reading,nil,view,ui); eq(ui.page,0) -- shrink clamps safely
+    end
+end
+print('Manual page bounds, signed column sorting and touch geometry passed')
