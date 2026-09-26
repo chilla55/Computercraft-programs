@@ -14,6 +14,7 @@ local function world(restore,thermalFault,options)
   options=options or {}
   local cfg=U.copy(cfg); local settings=cfg.settings
   if options.multiInput then settings.inputBreakers={'input','input2'} end
+  if options.voltageFallback then settings.sourceGauge='vsource'; settings.preStepUpGauge='vpre' end
   if options.ignoreSmallMoves then settings.positionToleranceDegrees=2 end
   local W={registrations={},time=0,nodes={},contacts={input=false,plus=false,minus=false},positions={a1=.8,a2=.5,b1=.9,c1=.98},temperature={},motion={},moves={},closes={},drop={}}
   if options.multiInput then W.contacts.input2=false end
@@ -92,11 +93,13 @@ local function world(restore,thermalFault,options)
       if W.openOnInputRead and role=='protection' then
         W.openOnInputRead=false; W.contacts.input=false
       end
+      if W.zeroInput and (W.zeroInput[role] or 0)>0 then W.zeroInput[role]=W.zeroInput[role]-1; return 0 end
       if options.invalidRegulationInput and role=='regulation' and N.R.state.phase=='await_output' then return 0 end
       return powered() and (W.inputVoltage or 1500) or 0
     end}
-    devices.vout={voltage=function() native(); local value=powered() and 3750*(options.voltageScale or 1)*(W.loadScale or 1) or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; if options.transientInBand and role=='regulation' and N.R.state.phase=='tuning' and W.maxStartupAttempt==1 and not W.transientUsed then W.transientUsed=true; return settings.target end; if options.oscillating then value=value*((W.maxStartupAttempt or 0)%2==0 and .97 or 1.03) end; return options.voltageExponent and 3750*(value/3750)^options.voltageExponent or value end}
-    devices.vpre={voltage=function() return devices.vout.voltage()/2.5 end}
+    devices.vsource={voltage=function() native(); return (W.inputVoltage or 1500)*settings.entryRatio end}
+    devices.vout={voltage=function() native(); if W.zeroOutput and (W.zeroOutput[role] or 0)>0 then W.zeroOutput[role]=W.zeroOutput[role]-1; return 0 end; local value=powered() and 3750*(options.voltageScale or 1)*(W.loadScale or 1) or 0; for _,name in ipairs({'a1','b1','c1'}) do value=value*(.00999996389330349+.989990071137444*W.positions[name]) end; if options.transientInBand and role=='regulation' and N.R.state.phase=='tuning' and W.maxStartupAttempt==1 and not W.transientUsed then W.transientUsed=true; return settings.target end; if options.oscillating then value=value*((W.maxStartupAttempt or 0)%2==0 and .97 or 1.03) end; return options.voltageExponent and 3750*(value/3750)^options.voltageExponent or value end}
+    devices.vpre={voltage=function() if options.voltageFallback then native(); return 1056 end; return devices.vout.voltage()/2.5 end}
     env.peripheral={wrap=function(name) return devices[name] end}; env.print=function() end
     local function mod(name) return assert(loadfile(base..name..'.lua','t',env))() end
     local modules={common=mod('common'),thermal=mod('thermal_protection'),planner=mod('planner'),hash=mod('sha256'),updater=mod('updater')}
@@ -456,6 +459,17 @@ local spread=(math.max(balanced.positions.a1,balanced.positions.b1,balanced.posi
 check(spread<30 and #balanced.moves>startMoves,'live banks did not move closer together')
 check(balanced.nodes[2].R.state.phase=='live','live balancing tripped')
 for i=startMoves+1,#balanced.moves do check(balanced.moves[i].degrees==1,'balancing used a large movement') end
+for _,side in ipairs({'zeroInput','zeroOutput'}) do
+ local fallback=world(nil,nil,{lowStart=true,voltageFallback=true})
+ fallback.untilTrue(function() return fallback.nodes[3].R.fresh('regulation')~=nil end,3); fallback.command('start')
+ check(fallback.untilTrue(function() return fallback.nodes[2].R.state.phase=='live' end,60),'fallback fixture failed startup')
+ fallback[side]={regulation=1,protection=1}
+ fallback.untilTrue(function() return false end,1)
+ check(fallback.contacts.input and fallback.contacts.plus and fallback.contacts.minus,'single low reading interrupted service')
+ check(fallback[side].regulation==0 and fallback[side].protection==0,'fallback fixture did not exercise both workers')
+ fallback[side]={regulation=2,protection=2}
+ check(fallback.untilTrue(function() return fallback.nodes[3].R.state.latched and not fallback.contacts.input end,2),'second low reading did not isolate')
+end
 local badInput=world(nil,nil,{lowStart=true,invalidRegulationInput=true})
 badInput.untilTrue(function() return badInput.nodes[3].R.fresh('regulation')~=nil end,3); badInput.command('start')
 check(badInput.untilTrue(function() return badInput.nodes[2].R.state.phase=='tripped' end,60),'invalid regulation reading did not trip')

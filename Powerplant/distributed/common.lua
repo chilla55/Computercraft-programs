@@ -1,4 +1,4 @@
-local M={protocol='transformer.cluster.v1',release='distributed-1.1.29',roles={'master','regulation','protection'}}
+local M={protocol='transformer.cluster.v1',release='distributed-1.1.30',roles={'master','regulation','protection'}}
 M.editable={'target','stepUp','entryRatio','inputGauge','outputGauge','sourceGauge','preStepUpGauge','sourceCurrentGauge','sourcePowerGauge','sourceCurrentTripAmps','inputBreakers','plusBreaker','minusBreaker','variacsA','variacsB','variacsC','gearA','gearB','gearC','travelDegrees','accuracyVolts','fallbackVolts','moveTimeout','chargeTimeout','positionToleranceDegrees','maxInputVolts','outputTripPercent','thermalMaxAgeSeconds','thermalGraceSeconds','thermalCoolSeconds','rampVoltsPerSecond','maxRampStepVolts','pollSeconds','settleSeconds'}
 M.fields={
   inputGauge={label="Voltage entering variacs",help="Required. Voltage gauge AFTER the entry transformer, BEFORE stage A."},
@@ -245,6 +245,37 @@ function M.checkAlignment(s)
   return banks,stationary
 end
 function M.voltage(name) local v=M.device(name).voltage(); assert(M.finite(v),'Invalid voltage '..name); return math.abs(v) end
+-- One low reading may use the opposite side of a fixed transformer.
+-- Counts are independent for each side and worker; read errors/OV never fall back.
+function M.voltageReader(primary,alternate,multiplier,breakers,defaultMax,label)
+  local failures,lastCycle=0,nil
+  return function(cycle,phase,maxVolts)
+    maxVolts=maxVolts or defaultMax
+    if cycle~=lastCycle then failures=0; lastCycle=cycle end
+    local voltage=M.voltage(primary)
+    if voltage>1 and voltage<=maxVolts then failures=0; return voltage,false end
+    failures=failures+1
+    local reason=('Invalid regulator %s: %.6f V from %s; required >1 V and <=%.2f V; phase %s'):format(label,voltage,primary,maxVolts,tostring(phase))
+    assert(voltage<=maxVolts,reason)
+    for _,name in ipairs(breakers) do
+      assert(M.device(name).isClosed(),'unknown_opening: input contact unexpectedly open')
+    end
+    assert(failures<2,reason..'; second consecutive low reading')
+    assert(alternate and alternate~='',reason..'; fallback gauge not configured')
+    local estimated=M.voltage(alternate)*multiplier
+    assert(M.finite(estimated) and estimated>1 and estimated<=maxVolts,reason..'; fallback outside safe range')
+    for _,name in ipairs(breakers) do
+      assert(M.device(name).isClosed(),'unknown_opening: input contact opened during voltage fallback')
+    end
+    return estimated,true
+  end
+end
+function M.inputReader(s)
+  return M.voltageReader(s.inputGauge,s.sourceGauge,1/s.entryRatio,s.inputBreakers,s.maxInputVolts,'input')
+end
+function M.outputReader(s)
+  return M.voltageReader(s.outputGauge,s.preStepUpGauge,s.stepUp,s.inputBreakers,math.huge,'output')
+end
 function M.contacts(s)
   local out={}; for _,name in ipairs(M.names(s)) do local v=M.device(name).getStatus(); assert(type(v)=='table' and type(v.closed)=='boolean','Invalid breaker '..name); out[name]=v end; return out
 end

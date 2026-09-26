@@ -2,6 +2,8 @@
 local M={}
 function M.new(R)
   local U,s=R.U,R.config.settings
+  local readInput=U.inputReader(s)
+  local readOutput=U.outputReader(s)
   local cancelledClose={} -- Internal cancellation, never a replacement trip reason.
   local policy=R.modules.thermal.new({s.variacsA,s.variacsB,s.variacsC},{graceSeconds=s.thermalGraceSeconds,maxAgeSeconds=s.thermalMaxAgeSeconds,coolSeconds=s.thermalCoolSeconds})
   local saved=U.read('distributed-thermal.json'); if saved then policy.restore(saved) end
@@ -82,7 +84,14 @@ function M.new(R)
           assert(R.now()-movingSince[i]<s.moveTimeout*1000,'variac_stuck: stage '..i..' did not stop')
         end
       end
-      local input=U.voltage(s.inputGauge); local output=U.voltage(s.outputGauge)
+      local input,estimated=readInput(R.state.cycle,R.state.phase)
+      local target=peer.activeTarget or R.state.target
+      local output,outputEstimated
+      if contacts[s.plusBreaker].closed or contacts[s.minusBreaker].closed then
+        output,outputEstimated=readOutput(R.state.cycle,R.state.phase,target*(1+s.outputTripPercent/100))
+      else output=U.voltage(s.outputGauge) end
+      R.state.outputEstimated=outputEstimated==true
+      R.state.inputEstimated=estimated
       R.state.inputVoltage=input; R.state.outputVoltage=output
       -- Native reads yield: a peer trip can open inputs after the contact
       -- snapshot above. Do not label the resulting dead input as a new fault.
@@ -97,7 +106,6 @@ function M.new(R)
         local p=U.device(s.sourceCurrentGauge); local amps=(p.current or p.getValue)()
         assert(U.finite(amps) and math.abs(amps)<=s.sourceCurrentTripAmps,'Source current unavailable/over limit')
       end
-      local target=peer.activeTarget or R.state.target
       assert(U.finite(target) and target>0 and target/(s.stepUp*.99999^3)<s.maxInputVolts,'Invalid regulation target')
       if contacts[s.plusBreaker].closed or contacts[s.minusBreaker].closed then
         assert(output>1 and output<=target*(1+s.outputTripPercent/100),'Output voltage outside safe range')

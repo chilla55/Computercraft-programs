@@ -3,6 +3,22 @@ local M={}
 function M.new(R)
   local U,s,P=R.U,R.config.settings,R.modules.planner
   local directions={}
+  local readInput=U.inputReader(s)
+  local function inputVoltage()
+    local value,estimated=readInput(R.state.cycle,R.state.phase)
+    R.state.inputEstimated=estimated
+    return value
+  end
+  local readOutput=U.outputReader(s)
+  local function outputVoltage()
+    -- Before tuning succeeds a low output can be intentional. Fallback is
+    -- enabled for connection/service, never used to certify a no-load preset.
+    if R.state.phase~='live' and R.state.phase~='await_output' then return U.voltage(s.outputGauge) end
+    local target=R.state.activeTarget or s.target
+    local value,estimated=readOutput(R.state.cycle,R.state.phase,target*(1+s.outputTripPercent/100))
+    R.state.outputEstimated=estimated
+    return value
+  end
   local presetKey=R.modules.hash(U.canonical(s))
   local presetPath='distributed-startup.json'
   local function guard(isolated)
@@ -13,7 +29,7 @@ function M.new(R)
     else
       for _,name in ipairs(s.inputBreakers) do assert(U.device(name).isClosed(),'unknown_opening: input contact unexpectedly open') end
       U.checkAlignment(s)
-      local input=U.voltage(s.inputGauge)
+      local input=inputVoltage()
       assert(input>1 and input<=s.maxInputVolts,('Invalid regulator input: %.6f V from %s; required >1 V and <=%.2f V; phase %s'):format(input,s.inputGauge,s.maxInputVolts,tostring(R.state.phase)))
       if R.state.phase=='live' then
         assert(U.device(s.plusBreaker).isClosed() and U.device(s.minusBreaker).isClosed(),'unknown_opening: output contact unexpectedly open')
@@ -106,7 +122,7 @@ function M.new(R)
       U.aligned(s)
       local before=U.positions(s)[i]
       if plan.balance then
-        local output=U.voltage(s.outputGauge)
+        local output=outputVoltage()
         local predicted=output*P.ratio(before.position+delta/s.travelDegrees)/P.ratio(before.position)
         if math.abs(output-plan.target)>10 or math.abs(predicted-plan.target)>10 then return end
       end
@@ -122,7 +138,7 @@ function M.new(R)
   end
   local previousLive,unreachableSince
   local function tune()
-    local input,output=U.voltage(s.inputGauge),U.voltage(s.outputGauge)
+    local input,output=inputVoltage(),outputVoltage()
     local target=R.state.activeTarget; local err=math.abs(output-target)
     local previous=previousLive; previousLive={input=input,output=output}
     -- A significant sag/rise needs a prompt bounded correction. Fine tuning
@@ -133,7 +149,7 @@ function M.new(R)
     if balance then
       apply(balance); previousLive=nil; unreachableSince=nil
       pause(s.settleSeconds or .2,false)
-      return math.abs(U.voltage(s.outputGauge)-target)<=10
+      return math.abs(outputVoltage()-target)<=10
     end
     -- Accept the balancing band instead of undoing a successful balance
     -- solely to chase sub-volt precision and then balancing back again.
@@ -152,7 +168,7 @@ function M.new(R)
       return false
     end
     apply(plan); previousLive=nil; unreachableSince=nil; pause(s.settleSeconds or .2,false)
-    return math.abs(U.voltage(s.outputGauge)-target)<=s.fallbackVolts
+    return math.abs(outputVoltage()-target)<=s.fallbackVolts
   end
   local function initialTune()
     local input,output
@@ -162,7 +178,7 @@ function M.new(R)
     local function verified(output)
       for sample=1,3 do
         if math.abs(output-R.state.activeTarget)>s.fallbackVolts then return false,output end
-        if sample<3 then pause(.15,false); output=U.voltage(s.outputGauge) end
+        if sample<3 then pause(.15,false); output=outputVoltage() end
       end
       return true,output
     end
@@ -174,7 +190,7 @@ function M.new(R)
       guard(false)
       assert(U.device(s.plusBreaker).isClosed()==false and U.device(s.minusBreaker).isClosed()==false,'Output must remain isolated during startup positioning')
       local before=U.stationaryBanks(s); U.aligned(s,before)
-      input,output=U.voltage(s.inputGauge),U.voltage(s.outputGauge)
+      input,output=inputVoltage(),outputVoltage()
       local ready
       ready,output=verified(output)
       if ready then return end
@@ -244,7 +260,7 @@ function M.new(R)
         end
         R.state.phase='tuning'
         pause(s.settleSeconds or .2,false)
-        output=U.voltage(s.outputGauge)
+        output=outputVoltage()
         measurement.output=output
         ready,output=verified(output)
         if ready then return end
@@ -277,7 +293,7 @@ function M.new(R)
         for i=1,2 do
           for j,member in ipairs(banks[i].members) do assert(member.position==baseline[i].members[j].position,'Bank A/B moved during C-only diagnostic') end
         end
-        local item={label=label,at=R.now(),banks=banks,input=U.voltage(s.inputGauge),preExit=U.voltage(test.gauge),output=U.voltage(s.outputGauge)}
+        local item={label=label,at=R.now(),banks=banks,input=inputVoltage(),preExit=U.voltage(test.gauge),output=outputVoltage()}
         if s.sourceGauge~='' then item.source=U.voltage(s.sourceGauge) end
         local peer=assert(R.fresh('protection')); item.temperatures=U.copy(peer.temperatures or {})
         report.samples[#report.samples+1]=item
@@ -317,7 +333,7 @@ function M.new(R)
     guard(false)
     assert(not U.device(s.plusBreaker).isClosed() and not U.device(s.minusBreaker).isClosed(),'Output must be isolated when saving no-load preset')
     local banks=U.stationaryBanks(s); U.aligned(s,banks)
-    local input,output=U.voltage(s.inputGauge),U.voltage(s.outputGauge)
+    local input,output=inputVoltage(),outputVoltage()
     if math.abs(output-R.state.activeTarget)<=s.fallbackVolts then
       local positions={}; for i,bank in ipairs(banks) do positions[i]=bank.position end
       local saved,why=pcall(U.write,presetPath,{schema=1,key=presetKey,target=R.state.activeTarget,input=input,output=output,positions=positions})
@@ -341,7 +357,7 @@ function M.new(R)
       guard(false)
       local p=assert(R.fresh('protection')); R.state.target=p.target
       local now=R.now(); local step=math.min(s.maxRampStepVolts,s.rampVoltsPerSecond*(now-last)/1000); last=now
-      if math.abs(U.voltage(s.outputGauge)-R.state.activeTarget)<=s.fallbackVolts then
+      if math.abs(outputVoltage()-R.state.activeTarget)<=s.fallbackVolts then
         local d=R.state.target-R.state.activeTarget; R.state.activeTarget=R.state.activeTarget+math.max(-step,math.min(step,d))
       end
       tune(); pause(s.pollSeconds or .1,false)
