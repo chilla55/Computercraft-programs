@@ -1,4 +1,7 @@
-# ComputerCraft power-plant programs
+# ComputerCraft programs
+
+The [Create stock network monitor](Storage/README.md) displays network item counts,
+vault capacity, and a live fill gauge on a monitor or computer terminal.
 
 The new [distributed transformer system](Powerplant/distributed/README.md) separates the UI/configuration master, variac regulation and protection/breaker control across three computers. All can trip; only protection can close breakers. It includes ender-modem communication and verified, staged GitHub updates.
 
