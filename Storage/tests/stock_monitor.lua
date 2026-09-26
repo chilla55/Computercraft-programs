@@ -14,7 +14,7 @@ local config={vaults={'a','b'},ticker='ticker'}
 local function wrap(name) return devices[name] end
 local r=m.sample(config,wrap)
 eq(r.current,112); eq(r.capacity,336); eq(r.slots,6); eq(r.occupied,3)
-eq(r.network,512); eq(r.ratio,1/3); eq(m.format(1234567),'1,234,567')
+eq(r.network,512); eq(r.nonVault,400); eq(r.ratio,1/3); eq(m.format(1234567),'1,234,567')
 devices.a=nil
 local ok,err=pcall(m.sample,config,wrap)
 assert(not ok and err:find('Vault offline'))
@@ -49,7 +49,8 @@ for _,size in ipairs({{51,19},{26,10},{7,5}}) do
         m.draw(target,{current=current,capacity=100,ratio=current/100,
             occupied=1,slots=2,network=current})
         if size[1]>=26 then
-            eq(lines[7]:sub(1,1),'0'); eq(lines[7]:sub(-3),'100')
+            local percentage=string.format('%.1f%% full',current)
+            eq(lines[7],string.rep(' ',math.floor((size[1]-#percentage)/2))..percentage)
             if current==0 then assert(not lines[6]:find('#')) end
             if current>=100 then assert(not lines[6]:find('-',1,true)) end
         end
@@ -185,18 +186,32 @@ print('Stable monitor scale and bounded/cached capacity reads passed')
 -- Doubled-size 3x2 layout retains counts, capacity, gauge and both net columns.
 local compact,compactLines=screen(29,12)
 m.draw(compact,{current=5000,capacity=10000,ratio=0.5,occupied=100,slots=200,
-    network=6000,trendPage=0,
+    network=6000,nonVault=1000,trendPage=0,
     trend={elapsed=300,minuteElapsed=60,changes={
         {name='minecraft:iron_ingot',minute=10,five=-100},
         {name='minecraft:gold_ingot',minute=-5,five=50},
         {name='minecraft:copper_ingot',minute=2,five=20},
     }}},nil,false)
 eq(compactLines[1],'VAULTS / 50.0% FULL')
-eq(compactLines[2],'Network: 6,000')
-eq(compactLines[3],'Items:   5,000')
-eq(compactLines[4],'Maximum: 10,000')
-eq(compactLines[6]:sub(1,1),'0'); eq(compactLines[6]:sub(-6),'10,000')
+eq(compactLines[2],'Non-vault: ~1,000')
+eq(compactLines[3],'Vault items: 5,000')
+eq(compactLines[4],'Vault max: 10,000')
+eq(compactLines[6],string.rep(' ',9)..'50.0% full')
 assert(compactLines[8]:find('1 min',1,true)); assert(compactLines[8]:find('5 min',1,true))
 assert(compactLines[9]:find('iron_ingot',1,true)); assert(compactLines[9]:find('+10',1,true))
 assert(compactLines[9]:find('-100',1,true)); assert(compactLines[11]:find('1/2',1,true))
 print('Doubled text scale and compact 3x2 dashboard checks passed')
+
+-- Never present unmatched vault/network scopes as a non-vault count.
+devices.a=vault(1,{{name='iron',count=10}},64)
+devices.ticker={stock=function() return {{name='gold',count=100}} end}
+r=m.sample({vaults={'a'},ticker='ticker'},wrap)
+eq(r.nonVault,nil); assert(r.nonVaultError)
+devices.ticker.stock=function() return {{name='iron',count=5}} end
+r=m.sample({vaults={'a'},ticker='ticker'},wrap)
+eq(r.nonVault,nil); assert(r.nonVaultError)
+devices.ticker.stock=function() return {{name='iron',count=10}} end
+r=m.sample({vaults={'a'},ticker='ticker'},wrap)
+eq(r.nonVault,0)
+r=m.sample({vaults={'a'}},wrap); eq(r.nonVault,nil)
+print('Non-vault subtraction, mismatched scopes and zero remainder checks passed')

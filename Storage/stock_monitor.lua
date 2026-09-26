@@ -1,4 +1,4 @@
--- stock-monitor-version: 1.0.3
+-- stock-monitor-version: 1.0.4
 -- Create Stock Ticker + Item Vault dashboard for CC: Tweaked.
 -- Run stock_monitor --configure to choose peripherals again.
 local M = {}
@@ -194,6 +194,14 @@ function M.sample(config, wrap, cache, progress)
         end)
         if ok then
             result.network, result.trendItems = value, items
+            -- The ticker and vault reads are separate snapshots. Only subtract
+            -- when every selected vault item is represented in network stock.
+            local consistent = true
+            for name, count in pairs(result.vaultItems) do
+                if count > (items[name] or 0) then consistent = false; break end
+            end
+            if consistent then result.nonVault = value - result.current
+            else result.nonVaultError = "Vault and network stock do not match" end
         else
             result.networkError = tostring(value)
         end
@@ -329,26 +337,26 @@ function M.draw(target, data, problem, trendView)
             or data.ratio >= 0.75 and colors.orange or colors.lime
         if data.historyError then line(1, "History save failed", colors.orange)
         else line(1, string.format("VAULTS / %.1f%% FULL", data.ratio * 100), color) end
-        line(2, "Network: " .. (data.network and M.format(data.network) or "unavailable"))
-        line(3, "Items:   " .. M.format(data.current))
-        line(4, "Maximum: " .. M.format(data.capacity))
+        line(2, "Non-vault: " .. (data.nonVault and ("~" .. M.format(data.nonVault)) or "unavailable"))
+        line(3, "Vault items: " .. M.format(data.current))
+        line(4, "Vault max: " .. M.format(data.capacity))
         local filled = math.floor(math.max(0, math.min(1, data.ratio)) * (w - 2))
         line(5, "[" .. string.rep("#", filled) .. string.rep("-", w - 2 - filled) .. "]", color)
-        local maximum = M.format(data.capacity)
-        line(6, "0" .. string.rep(" ", math.max(1, w - #maximum - 1)) .. maximum)
+        local percentage = string.format("%.1f%% full", data.ratio * 100)
+        line(6, string.rep(" ", math.max(0, math.floor((w - #percentage) / 2))) .. percentage, color)
         changes(7)
         return
     end
-    line(2, "Network: " .. (data.network and M.format(data.network) or "unavailable"))
-    line(3, "Items:   " .. M.format(data.current))
-    line(4, "Maximum: " .. M.format(data.capacity))
+    line(2, "Non-vault: " .. (data.nonVault and ("~" .. M.format(data.nonVault)) or "unavailable"))
+    line(3, "Vault items: " .. M.format(data.current))
+    line(4, "Vault max: " .. M.format(data.capacity))
     local color = data.ratio >= 0.9 and colors.red
         or data.ratio >= 0.75 and colors.orange or colors.lime
     line(5, string.format("Vault fill: %.1f%%", data.ratio * 100), color)
     local filled = math.floor(math.max(0, math.min(1, data.ratio)) * (w - 2))
     line(6, "[" .. string.rep("#", filled) .. string.rep("-", w - 2 - filled) .. "]", color)
-    local maximum = M.format(data.capacity)
-    line(7, "0" .. string.rep(" ", math.max(1, w - #maximum - 1)) .. maximum)
+    local percentage = string.format("%.1f%% full", data.ratio * 100)
+    line(7, string.rep(" ", math.max(0, math.floor((w - #percentage) / 2))) .. percentage, color)
     line(8, "Slots used: " .. M.format(data.occupied) .. "/" .. M.format(data.slots))
     line(9, "Max assumes full-size stacks", colors.lightGray)
     if data.current > data.capacity then

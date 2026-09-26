@@ -1,7 +1,7 @@
 # Create stock network monitor
 
-`stock_monitor.lua` shows network item counts, current vault items, maximum
-capacity, and a horizontal fill gauge from **0** to **maximum capacity**.
+`stock_monitor.lua` shows non-vault item counts, current vault items, maximum
+capacity, and a horizontal fill gauge with a centered **percentage full** label.
 It runs on a CC: Tweaked computer terminal or monitor and only reads storage.
 
 ## Installer and automatic updates
@@ -96,14 +96,20 @@ scan progress, and restarting during this scan retains the saved configuration.
 
 ## Meaning of the readings
 
-- **Network:** all item counts from the ticker's `stock()`. This can include
-  storage outside the selected vaults. The ticker's `list()` is its payment
-  inventory and is not used.
-- **Items:** current items inside the selected vaults.
-- **Maximum:** sum of the reported limits of every vault slot, including empty
+- **Non-vault:** the Stock Ticker's network total minus items in the selected
+  vaults. Select **all vaults belonging to the ticker's network**; any unselected
+  vaults are included in this remainder. The `~` marks an estimate because ticker
+  and vault reads happen at different times. If any vault item's count exceeds
+  its network count, this shows `unavailable` instead of a misleading or negative
+  total. A missing/failed ticker also makes this unavailable. The ticker's
+  payment inventory (`list()`) is not used.
+- **Vault items:** current items inside the selected vaults.
+- **Vault max:** sum of the reported limits of every vault slot, including empty
   ones. Uses actual reported limits rather than a hardcoded capacity per block.
 - **Vault fill:** vault items divided by maximum items. The gauge runs from
-  0 to maximum, green below 75%, orange from 75%, red from 90%.
+  empty to maximum capacity and shows a centered percentage instead of numeric
+  endpoint labels. The vault maximum remains listed above it. The gauge is green
+  below 75%, orange from 75%, and red from 90%.
 - **Slots used:** occupied slots divided by total slots. Tools, items that stack
   to 16, and partial stacks can exhaust slots before the item gauge reaches 100%.
   Maximum is nominal full-size-stack capacity, not guaranteed free space for
