@@ -47,7 +47,9 @@ before launching. Adjust names if the old program used a different filename.
 ## Computer control panel
 
 With the external monitor selected, the computer terminal shows configuration
-and update controls while the monitor displays the storage dashboard:
+and update controls while the monitor displays the storage dashboard. The running
+version is shown in the top-right corner of the terminal (including fallback
+mode when the monitor is disconnected):
 
 - **C:** choose the ticker, vaults, and display again on the computer terminal.
   The monitor keeps its last screen during configuration.
@@ -187,7 +189,9 @@ Increase the `stock-monitor-version` header in `stock_monitor.lua`, then run:
 python3 Storage/tools/build_release.py
 ```
 
-Publish the monitor and generated `Storage/release.json` together to `main`.
+The build script also synchronizes the version displayed in the terminal with
+the version header. Publish the monitor and generated `Storage/release.json`
+together to `main`.
 Clients install strictly newer versions. A transient mismatch during publication
 is rejected and retried later. Same-version changes and downgrades are ignored.
 The installer, monitor, and manifest must be published before the install command

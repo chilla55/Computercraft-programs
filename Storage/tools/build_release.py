@@ -9,6 +9,14 @@ body = (root / "stock_monitor.lua").read_bytes()
 match = re.match(rb"-- stock-monitor-version: (\d+\.\d+\.\d+)\n", body)
 if not match:
     raise SystemExit("Missing stock-monitor-version header")
+# Keep the running program's displayed version in sync with the release header.
+body, replaced = re.subn(
+    rb'local M = \{ version = "[^"]+" \}',
+    b'local M = { version = "' + match[1] + b'" }', body, count=1,
+)
+if replaced != 1:
+    raise SystemExit("Missing runtime version field")
+(root / "stock_monitor.lua").write_bytes(body)
 manifest = {
     "schema": 1,
     "version": match[1].decode("ascii"),

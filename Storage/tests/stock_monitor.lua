@@ -41,6 +41,7 @@ local function screen(w,h)
             assert(x+#s-1<=w)
             local old=lines[y] or ''
             lines[y]=old:sub(1,x-1)..string.rep(' ',math.max(0,x-1-#old))..s..old:sub(x+#s)
+            x=x+#s
         end},lines
 end
 for _,size in ipairs({{51,19},{26,10},{7,5}}) do
@@ -146,7 +147,9 @@ print('stock_monitor: rolling trends, recovery, sources, and paging checks passe
 
 local control,controlLines=screen(51,19)
 m.drawConsole(control,{current=120,capacity=1000},nil,{vaults={'a','b'},ticker='ticker'},'Up to date')
-eq(controlLines[1],'STORAGE CONTROL PANEL')
+eq(controlLines[1]:sub(1,21),'STORAGE CONTROL PANEL')
+eq(controlLines[1]:sub(-#m.version-1),'v'..m.version)
+eq(#controlLines[1],51)
 eq(controlLines[3],'Configured vaults: 2')
 assert(controlLines[18]:find('C: configure',1,true))
 assert(controlLines[18]:find('U: check updates',1,true))
@@ -215,3 +218,11 @@ r=m.sample({vaults={'a'},ticker='ticker'},wrap)
 eq(r.nonVault,0)
 r=m.sample({vaults={'a'}},wrap); eq(r.nonVault,nil)
 print('Non-vault subtraction, mismatched scopes and zero remainder checks passed')
+
+for _,width in ipairs({26,39,51}) do
+    local small,rows=screen(width,19)
+    m.drawConsole(small,nil,nil,{vaults={'a'}},'Ready')
+    eq(#rows[1],width)
+    eq(rows[1]:sub(-#m.version-1),'v'..m.version)
+end
+print('Running version aligned to terminal top-right at multiple widths')

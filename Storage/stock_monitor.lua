@@ -1,7 +1,7 @@
--- stock-monitor-version: 1.0.4
+-- stock-monitor-version: 1.0.5
 -- Create Stock Ticker + Item Vault dashboard for CC: Tweaked.
 -- Run stock_monitor --configure to choose peripherals again.
-local M = {}
+local M = { version = "1.0.5" }
 
 local function number(value, label)
     assert(type(value) == "number" and value >= 0 and value < math.huge
@@ -371,6 +371,17 @@ function M.draw(target, data, problem, trendView)
     if h >= 15 then changes(11) end
 end
 
+function M.terminalHeading(target, title)
+    local w = target.getSize()
+    local version = ("v" .. M.version):sub(-w)
+    title = title:sub(1, math.max(0, w - #version - 1))
+    target.setCursorPos(1, 1)
+    target.setTextColor(colors.cyan)
+    target.write(title .. string.rep(" ", w - #title - #version))
+    target.setTextColor(colors.lightGray)
+    target.write(version)
+end
+
 function M.drawConsole(target, data, problem, config, status)
     local w, h = target.getSize()
     target.setBackgroundColor(colors.black)
@@ -382,7 +393,7 @@ function M.drawConsole(target, data, problem, config, status)
         target.setTextColor(color or colors.white)
         target.write(text:sub(1, w))
     end
-    line(1, "STORAGE CONTROL PANEL", colors.cyan)
+    M.terminalHeading(target, "STORAGE CONTROL PANEL")
     line(3, "Configured vaults: " .. #config.vaults)
     line(4, "Ticker: " .. (config.ticker or "none (vault totals)"))
     if data then
@@ -579,6 +590,7 @@ function M.main(args, services)
                 end
             else
                 draw(terminal)
+                M.terminalHeading(terminal, "VAULT STORAGE")
                 local w, h = terminal.getSize()
                 terminal.setCursorPos(1, h)
                 terminal.write(("C: setup U: update N: view Q: quit"):sub(1, w))
