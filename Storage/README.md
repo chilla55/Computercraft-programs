@@ -153,10 +153,23 @@ of both windows; sampling intervals can make mature windows slightly longer than
 Trends use the Stock Ticker's entire network when configured, otherwise the
 selected vaults. Counts are grouped by registry item name (NBT variants are
 combined). The rolling per-item snapshots are saved after each scan in
-`<program-name>.history`, beside the configuration. Writes use a temporary file
-and retain a `.bak` copy for interrupted-write recovery. This is the recent
-five-minute window, not an unbounded lifetime log. History write failures are
-reported on the monitor.
+`<program-name>.history`, beside the configuration. Item names are stored once
+and each snapshot records only changed counts, preserving the same sampled
+history with much less repeated data. Older history files are read automatically
+and rewritten in the compact format on the next save.
+
+Writes use a temporary file and retain a `.bak` copy for interrupted-write
+recovery. Failed writes close the file and remove the incomplete temporary copy.
+Free space is checked before writing; under space pressure an older backup may
+be removed while the current history stays intact. If space is still insufficient,
+the current file is preserved and the next scan retries the save. This is the
+recent five-minute window, not an unbounded lifetime log.
+
+History write failures are flagged on the monitor and shown with the actual
+error in the computer terminal's **HISTORY SAVE ERROR** section. For disk-space
+errors this includes the required and available byte counts. Live monitoring
+continues even when history cannot be saved; persistence resumes after a
+successful write.
 
 Recent history is reloaded after a restart or automatic update. History resets
 when the latest saved reading is more than 60 seconds old, the stock source or

@@ -261,7 +261,7 @@ monitor.main({},services)
 eq(manualCount,1); eq(timerCount,3); eq(services.configuring,false)
 eq(capacityReads,2) -- first scan and configuration change, not resize or timer
 assert(decode(files[path..'.cfg']).monitor=='display')
-assert(decode(files[path..'.history']).schema==1)
+assert(decode(files[path..'.history']).schema==2)
 print('Parallel terminal input during slow reads, resize isolation, configuration and history passed')
 
 -- Reconfiguration during an in-flight read discards that old generation.
@@ -297,3 +297,62 @@ updater.main({'custom','--startup'}); eq(selectedStartup,true)
 assert(not pcall(updater.main,{'custom','--unknown'}))
 updater.install=realInstall
 print('Installer startup defaults and opt-out checks passed')
+
+-- Compact encoding preserves every sample while reducing repeated stock data.
+local large={samples={}}
+for i=0,60 do
+    local items={}
+    for n=1,100 do items['minecraft:test_item_with_long_name_'..n]=100 end
+    items.minecraft_changing_item=i
+    large.samples[#large.samples+1]={time=700+i*5,items=items}
+end
+local packed=monitor.packHistory(cfg,large)
+local legacy={schema=1,scope=packed.scope,samples=large.samples}
+local compactBytes,legacyBytes=serialize(packed),serialize(legacy)
+assert(#compactBytes<#legacyBytes/5,'History compression ineffective')
+local expanded=monitor.unpackHistory(packed)
+for i,sample in ipairs(large.samples) do
+    eq(expanded.samples[i].time,sample.time)
+    for name,count in pairs(sample.items) do eq(expanded.samples[i].items[name] or 0,count) end
+end
+local transitions={samples={
+    {time=700,items={iron=10}}, {time=850,items={gold=20}}, {time=1000,items={iron=30}},
+}}
+expanded=monitor.unpackHistory(monitor.packHistory(cfg,transitions))
+eq(expanded.samples[2].items.iron,nil); eq(expanded.samples[2].items.gold,20)
+eq(expanded.samples[3].items.gold,nil); eq(expanded.samples[3].items.iron,30)
+local compactPath='storage/compact.history'
+files[compactPath]=legacyBytes
+eq(#monitor.loadHistory(compactPath,cfg,1005).samples,61)
+monitor.saveHistory(compactPath,cfg,large)
+eq(decode(files[compactPath]).schema,2)
+eq(#monitor.loadHistory(compactPath,cfg,1005).samples,61)
+-- Space pressure may remove an older backup but must preserve current history.
+fs.getFreeSpace=function()
+    return fs.exists(compactPath..'.bak') and #compactBytes-1 or #compactBytes
+end
+monitor.saveHistory(compactPath,cfg,large)
+local previous=files[compactPath]
+files[compactPath..'.tmp']='interrupted partial file'
+fs.getFreeSpace=function() return 0 end
+local saved,saveError=pcall(monitor.saveHistory,compactPath,cfg,large)
+assert(not saved and saveError:find('Not enough disk space',1,true))
+eq(files[compactPath],previous); eq(files[compactPath..'.tmp'],nil)
+fs.getFreeSpace=nil
+-- A partial-write error closes the handle and discards only the temporary file.
+local realOpen=fs.open
+local closedOnFailure=false
+fs.open=function(p,mode)
+    if p==compactPath..'.tmp' and mode=='w' then
+        return {write=function(bytes) files[p]=bytes:sub(1,10); error('Disk full during write') end,
+            close=function() closedOnFailure=true end}
+    end
+    return realOpen(p,mode)
+end
+saved,saveError=pcall(monitor.saveHistory,compactPath,cfg,large)
+assert(not saved and saveError:find('Disk full during write',1,true))
+assert(closedOnFailure); eq(files[compactPath],previous); eq(files[compactPath..'.tmp'],nil)
+fs.open=realOpen
+monitor.saveHistory(compactPath,cfg,large)
+eq(#monitor.loadHistory(compactPath,cfg,1005).samples,61)
+print('History compression, legacy migration, low-space recovery and failed-write cleanup passed')

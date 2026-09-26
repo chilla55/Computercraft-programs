@@ -226,3 +226,9 @@ for _,width in ipairs({26,39,51}) do
     eq(rows[1]:sub(-#m.version-1),'v'..m.version)
 end
 print('Running version aligned to terminal top-right at multiple widths')
+
+local errorScreen,errorLines=screen(51,19)
+m.drawConsole(errorScreen,nil,nil,{vaults={'a'}},'Up to date','Not enough disk space: history needs 2000 bytes')
+eq(errorLines[7],'HISTORY SAVE ERROR')
+assert(errorLines[8]:find('Not enough disk space',1,true))
+print('Exact history save error appears in the terminal control panel')

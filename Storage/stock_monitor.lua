@@ -1,7 +1,7 @@
--- stock-monitor-version: 1.0.5
+-- stock-monitor-version: 1.0.6
 -- Create Stock Ticker + Item Vault dashboard for CC: Tweaked.
 -- Run stock_monitor --configure to choose peripherals again.
-local M = { version = "1.0.5" }
+local M = { version = "1.0.6" }
 
 local function number(value, label)
     assert(type(value) == "number" and value >= 0 and value < math.huge
@@ -82,6 +82,55 @@ local function historyScope(config)
     return (config.ticker or "vaults") .. "\n" .. table.concat(names, "\n")
 end
 
+-- Dictionary + changed counts preserve every snapshot without repeating all
+-- registry names and unchanged stock on disk. A zero marks a removed item.
+function M.packHistory(config, history)
+    local packed = { schema = 2, scope = historyScope(config), names = {}, samples = {} }
+    local index, previous = {}, {}
+    for _, sample in ipairs(history.samples or {}) do
+        local changes = {}
+        for name, count in pairs(sample.items) do
+            if not index[name] then
+                packed.names[#packed.names + 1] = name
+                index[name] = #packed.names
+            end
+            if count ~= (previous[name] or 0) then changes[index[name]] = count end
+        end
+        for name, count in pairs(previous) do
+            if count ~= 0 and not sample.items[name] then changes[index[name]] = 0 end
+        end
+        packed.samples[#packed.samples + 1] = { time = sample.time, changes = changes }
+        previous = sample.items
+    end
+    return packed
+end
+
+function M.unpackHistory(saved)
+    if saved.schema == 1 then return saved end -- migrate existing installations
+    assert(saved.schema == 2 and type(saved.names) == "table", "Invalid history schema")
+    assert(type(saved.samples) == "table" and #saved.samples <= 302, "Invalid samples")
+    local namesSeen, previous, samples = {}, {}, {}
+    for _, name in ipairs(saved.names) do
+        assert(type(name) == "string" and not namesSeen[name], "Invalid history dictionary")
+        namesSeen[name] = true
+    end
+    for _, sample in ipairs(saved.samples) do
+        assert(type(sample) == "table" and type(sample.changes) == "table", "Invalid history changes")
+        local items = {}
+        for name, count in pairs(previous) do items[name] = count end
+        for index, count in pairs(sample.changes) do
+            assert(type(index) == "number" and index >= 1 and index % 1 == 0
+                and saved.names[index], "Invalid history item index")
+            number(count, "history count")
+            if count == 0 then items[saved.names[index]] = nil
+            else items[saved.names[index]] = count end
+        end
+        samples[#samples + 1] = { time = sample.time, items = items }
+        previous = items
+    end
+    return { schema = 1, scope = saved.scope, samples = samples }
+end
+
 function M.loadHistory(path, config, now)
     for _, candidate in ipairs({ path, path .. ".bak" }) do
         if fs.exists(candidate) then
@@ -90,7 +139,9 @@ function M.loadHistory(path, config, now)
                 local file = assert(fs.open(candidate, "r"))
                 local bytes = file.readAll(); file.close()
                 local saved = textutils.unserialize(bytes)
-                assert(type(saved) == "table" and saved.schema == 1
+                assert(type(saved) == "table", "Invalid history file")
+                saved = M.unpackHistory(saved)
+                assert(saved.schema == 1
                     and saved.scope == historyScope(config), "History scope changed")
                 assert(type(saved.samples) == "table" and #saved.samples <= 302, "Invalid samples")
                 local previous = -math.huge
@@ -115,14 +166,35 @@ function M.loadHistory(path, config, now)
 end
 
 function M.saveHistory(path, config, history)
-    local bytes = textutils.serialize({ schema = 1, scope = historyScope(config),
-        samples = history.samples or {} })
+    local bytes = textutils.serialize(M.packHistory(config, history), { compact = true })
     assert(#bytes <= 8 * 1024 * 1024, "History exceeds 8 MiB")
     local temporary, backup = path .. ".tmp", path .. ".bak"
-    local file = assert(fs.open(temporary, "w"), "Cannot write stock history")
-    file.write(bytes); file.close()
-    -- Recover a previously interrupted replacement before rotating the backup.
+    -- Clean up interrupted temporary writes; never remove the sole good copy.
+    if fs.exists(temporary) then fs.delete(temporary) end
     if not fs.exists(path) and fs.exists(backup) then fs.move(backup, path) end
+    if fs.getFreeSpace then
+        local directory = fs.getDir(path)
+        local free = fs.getFreeSpace(directory)
+        if type(free) == "number" and free < #bytes and fs.exists(path) and fs.exists(backup) then
+            -- The current history remains intact while an older backup is freed.
+            fs.delete(backup)
+            free = fs.getFreeSpace(directory)
+        end
+        assert(type(free) ~= "number" or free >= #bytes,
+            "Not enough disk space: history needs " .. #bytes .. " bytes; free " .. tostring(free))
+    end
+    local file, openError = fs.open(temporary, "w")
+    assert(file, "Cannot write " .. temporary .. ": " .. tostring(openError))
+    local written, writeError = pcall(file.write, bytes)
+    local closed, closeError = pcall(file.close)
+    if not written or not closed then
+        pcall(fs.delete, temporary)
+        error(tostring(not written and writeError or closeError), 0)
+    end
+    if fs.getSize(temporary) ~= #bytes then
+        pcall(fs.delete, temporary)
+        error("History write was incomplete", 0)
+    end
     if fs.exists(path) then
         if fs.exists(backup) then fs.delete(backup) end
         fs.move(path, backup)
@@ -130,6 +202,7 @@ function M.saveHistory(path, config, history)
     local ok, reason = pcall(fs.move, temporary, path)
     if not ok then
         if not fs.exists(path) and fs.exists(backup) then fs.move(backup, path) end
+        pcall(fs.delete, temporary)
         error(reason, 0)
     end
 end
@@ -382,7 +455,7 @@ function M.terminalHeading(target, title)
     target.write(version)
 end
 
-function M.drawConsole(target, data, problem, config, status)
+function M.drawConsole(target, data, problem, config, status, historyError)
     local w, h = target.getSize()
     target.setBackgroundColor(colors.black)
     target.setTextColor(colors.white)
@@ -401,8 +474,10 @@ function M.drawConsole(target, data, problem, config, status)
     elseif problem then
         line(5, "Storage unavailable; retrying", colors.orange)
     end
-    line(7, "UPDATER", colors.cyan)
+    historyError = historyError or (data and data.historyError)
+    line(7, historyError and "HISTORY SAVE ERROR" or "UPDATER", historyError and colors.orange or colors.cyan)
     local message = status or "Start with storage/start.lua --run to enable updates"
+    if historyError then message = historyError .. " | Updater: " .. message end
     for y = 8, h - 3 do
         line(y, message:sub((y - 8) * w + 1, (y - 7) * w), colors.lightGray)
     end
@@ -533,8 +608,9 @@ function M.main(args, services)
                 local trend = M.trend(history, ok and result.trendItems or nil, now)
                 local saved, saveError = pcall(M.saveHistory, historyPath, config, history)
                 if not saved and saveError == "Terminated" then error(saveError, 0) end
+                services.historyError = not saved and tostring(saveError) or nil
                 if ok then
-                    result.historyError = not saved and tostring(saveError) or nil
+                    result.historyError = services.historyError
                     result.trend = trend
                     result.trendSource = config.ticker and "stock network" or "selected vaults"
                     result.trendPage = math.floor(now / 10)
@@ -582,7 +658,7 @@ function M.main(args, services)
     local function terminalTask()
         local function render()
             if config.monitor and peripheral.wrap(config.monitor) and not displayError then
-                M.drawConsole(terminal, lastData, lastProblem, config, services.updateStatus)
+                M.drawConsole(terminal, lastData, lastProblem, config, services.updateStatus, services.historyError)
                 local w, h = terminal.getSize()
                 if h >= 6 then
                     terminal.setCursorPos(1, 6)
