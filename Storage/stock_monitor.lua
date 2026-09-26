@@ -1,4 +1,4 @@
--- stock-monitor-version: 1.0.1
+-- stock-monitor-version: 1.0.2
 -- Create Stock Ticker + Item Vault dashboard for CC: Tweaked.
 -- Run stock_monitor --configure to choose peripherals again.
 local M = {}
@@ -47,19 +47,30 @@ function M.trend(history, items, now)
     while #samples > 1 and samples[2].time <= now - 300 do
         table.remove(samples, 1)
     end
-    local baseline = samples[1]
-    local elapsed = now - baseline.time
-    local result = { elapsed = elapsed, remaining = math.max(0, 300 - elapsed), losses = {} }
-    if elapsed < 300 then return result end
-    for name, count in pairs(baseline.items) do
+    local baseline, minute = samples[1], samples[1]
+    for _, sample in ipairs(samples) do
+        if sample.time <= now - 60 then minute = sample else break end
+    end
+    local result = { elapsed = now - baseline.time, minuteElapsed = now - minute.time, changes = {} }
+    local names = {}
+    for _, counts in ipairs({ baseline.items, minute.items, items }) do
+        for name in pairs(counts) do names[name] = true end
+    end
+    for name in pairs(names) do
         local current = items[name] or 0
-        if current < count then
-            result.losses[#result.losses + 1] = { name = name, current = current, loss = count - current }
+        local fiveDelta = current - (baseline.items[name] or 0)
+        local minuteDelta = current - (minute.items[name] or 0)
+        if fiveDelta ~= 0 or minuteDelta ~= 0 then
+            result.changes[#result.changes + 1] = {
+                name = name, current = current, five = fiveDelta, minute = minuteDelta,
+            }
         end
     end
-    table.sort(result.losses, function(a, b)
-        if a.loss == b.loss then return a.name < b.name end
-        return a.loss > b.loss
+    table.sort(result.changes, function(a, b)
+        local aMagnitude = math.max(math.abs(a.five), math.abs(a.minute))
+        local bMagnitude = math.max(math.abs(b.five), math.abs(b.minute))
+        if aMagnitude == bMagnitude then return a.name < b.name end
+        return aMagnitude > bMagnitude
     end)
     return result
 end
@@ -248,35 +259,65 @@ function M.draw(target, data, problem, trendView)
         line(h, "Retrying... Q: quit")
         return
     end
-    local function losses(top)
+    local function changes(top)
         local trend = data.trend
-        line(top, "NET LOSSES / LAST 5 MIN", colors.cyan)
+        line(top, "NET CHANGE / 1 MIN + 5 MIN", colors.cyan)
         if not trend or trend.unavailable then
             line(top + 1, "Trend data unavailable", colors.orange)
-        elseif trend.remaining > 0 then
-            line(top + 1, "Collecting: " .. math.ceil(trend.remaining) .. "s left", colors.lightGray)
-        elseif #trend.losses == 0 then
-            line(top + 1, "No items decreasing", colors.lime)
+        elseif trend.elapsed == 0 then
+            line(top + 1, "Waiting for next snapshot", colors.lightGray)
         else
-            local rows = h - top - 2
-            local pages = math.ceil(#trend.losses / rows)
-            local page = (data.trendPage or 0) % pages
-            for row = 1, rows do
-                local item = trend.losses[page * rows + row]
-                if not item then break end
-                local amount = " -" .. M.format(item.loss)
-                local name = item.name
-                if #name + #amount > w then name = name:gsub("^[^:]+:", "") end
-                name = name:sub(1, math.max(1, w - #amount - 1))
-                line(top + row, name .. string.rep(" ", math.max(1, w - #name - #amount)) .. amount, colors.orange)
+            local column = math.max(7, math.min(14, math.floor((w - 8) / 2)))
+            local nameWidth = w - 2 * column - 2
+            local function row(y, name, minute, five, minuteColor, fiveColor)
+                line(y, name:sub(1, nameWidth)
+                    .. string.rep(" ", math.max(0, nameWidth - #name))
+                    .. " " .. string.rep(" ", column - #minute) .. minute
+                    .. " " .. string.rep(" ", column - #five) .. five)
+                if minuteColor then
+                    target.setCursorPos(nameWidth + 2 + column - #minute, y)
+                    target.setTextColor(minuteColor); target.write(minute)
+                    target.setCursorPos(w - #five + 1, y)
+                    target.setTextColor(fiveColor); target.write(five)
+                end
             end
-            line(h - 1, string.format("Page %d/%d | window %.0fs", page + 1, pages, trend.elapsed), colors.lightGray)
+            local function duration(seconds, full, label)
+                return seconds < full and (math.floor(seconds) .. "s") or label
+            end
+            row(top + 1, "ITEM", duration(trend.minuteElapsed, 60, "1 min"), duration(trend.elapsed, 300, "5 min"))
+            local rows = h - top - 3
+            local pages = math.max(1, math.ceil(#trend.changes / rows))
+            local page = (data.trendPage or 0) % pages
+            local function signed(value)
+                if value == 0 then return "0" end
+                local sign, magnitude = value > 0 and "+" or "-", math.abs(value)
+                local text = sign .. M.format(magnitude)
+                if #text <= column then return text end
+                for _, unit in ipairs({ {1e3, "k"}, {1e6, "M"}, {1e9, "B"}, {1e12, "T"} }) do
+                    if magnitude < unit[1] * 1000 then
+                        return sign .. string.format("%.1f%s", math.floor(magnitude / unit[1] * 10) / 10, unit[2])
+                    end
+                end
+                return string.format("%+.0e", value):sub(1, column)
+            end
+            local function color(value)
+                return value > 0 and colors.lime or value < 0 and colors.red or colors.lightGray
+            end
+            if #trend.changes == 0 then line(top + 2, "No net changes", colors.lightGray) end
+            for index = 1, rows do
+                local item = trend.changes[page * rows + index]
+                if not item then break end
+                local name = item.name
+                if #name > nameWidth then name = name:gsub("^[^:]+:", "") end
+                row(top + 1 + index, name, signed(item.minute), signed(item.five), color(item.minute), color(item.five))
+            end
+            line(h - 1, string.format("1m:%.0fs 5m:%.0fs | %d/%d", trend.minuteElapsed, trend.elapsed, page + 1, pages), colors.lightGray)
         end
-        line(h, "N: " .. (trendView and "summary" or "losses") .. " / Q: quit", colors.lightGray)
+        line(h, "N: " .. (trendView and "summary" or "changes") .. " / Q: quit", colors.lightGray)
     end
     if trendView then
         line(2, "Source: " .. (data.trendSource or "network"), colors.lightGray)
-        losses(3)
+        changes(3)
         return
     end
     line(2, "Network: " .. (data.network and M.format(data.network) or "unavailable"))
@@ -298,9 +339,9 @@ function M.draw(target, data, problem, trendView)
     elseif data.networkError then
         line(10, "Ticker unavailable; Q: quit", colors.orange)
     else
-        line(10, "N: losses / Q: quit", colors.lightGray)
+        line(10, "N: changes / Q: quit", colors.lightGray)
     end
-    if h >= 14 then losses(11) end
+    if h >= 15 then changes(11) end
 end
 
 function M.drawConsole(target, data, problem, config, status)
@@ -328,7 +369,7 @@ function M.drawConsole(target, data, problem, config, status)
         line(y, message:sub((y - 8) * w + 1, (y - 7) * w), colors.lightGray)
     end
     line(h - 1, "C: configure vaults/display   U: check updates")
-    line(h, "N: monitor losses/summary    Q: quit")
+    line(h, "N: monitor changes/summary    Q: quit")
 end
 
 local function discover()

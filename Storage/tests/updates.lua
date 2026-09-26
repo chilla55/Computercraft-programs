@@ -107,7 +107,7 @@ local hp=path..'.history'
 monitor.saveHistory(hp,cfg,history)
 local restored=monitor.loadHistory(hp,{vaults={'a','b'},ticker='ticker'},1005)
 eq(#restored.samples,3)
-eq(monitor.trend(restored,{iron=50},1005).losses[1].loss,50)
+eq(monitor.trend(restored,{iron=50},1005).changes[1].five,-50)
 eq(#monitor.loadHistory(hp,cfg,1061).samples,0) -- offline too long
 assert(#monitor.loadHistory(hp,{vaults={'a'},ticker='ticker'},1005).samples==0)
 eq(#monitor.loadHistory(hp,cfg,999).samples,0) -- clock moved backwards

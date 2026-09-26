@@ -37,7 +37,11 @@ local function screen(w,h)
         setCursorPos=function(a,b)
             assert(a>=1 and a<=w and b>=1 and b<=h); x,y=a,b
         end,
-        write=function(s) assert(x+#s-1<=w); lines[y]=s end},lines
+        write=function(s)
+            assert(x+#s-1<=w)
+            local old=lines[y] or ''
+            lines[y]=old:sub(1,x-1)..string.rep(' ',math.max(0,x-1-#old))..s..old:sub(x+#s)
+        end},lines
 end
 for _,size in ipairs({{51,19},{26,10},{7,5}}) do
     local target,lines=screen(size[1],size[2])
@@ -59,54 +63,76 @@ print('stock_monitor: data, failures, capacity, and rendering checks passed')
 local counts=m.items({{name='iron',count=10},{name='iron',count=5,nbt='variant'},
     [8]={name='gold',count=7}})
 eq(counts.iron,15); eq(counts.gold,7)
+local function change(trend,name)
+    for _,item in ipairs(trend.changes) do if item.name==name then return item end end
+end
 local history={}
 local t=m.trend(history,{iron=100,gold=20,coal=10},0)
-eq(t.remaining,300); eq(#t.losses,0)
-t=m.trend(history,{iron=90,gold=30,coal=10},120)
-eq(t.remaining,180); eq(#t.losses,0)
-t=m.trend(history,{iron=60,gold=30},300)
-eq(t.remaining,0); eq(#t.losses,2)
-eq(t.losses[1].name,'iron'); eq(t.losses[1].loss,40)
-eq(t.losses[2].name,'coal'); eq(t.losses[2].loss,10); eq(t.losses[2].current,0)
-t=m.trend(history,{iron=85,gold=30,coal=10},420)
-eq(#t.losses,1); eq(t.losses[1].loss,5); eq(t.elapsed,300)
--- Replenishment cancels out earlier consumption in the net change.
-t=m.trend(history,{iron=100,gold=40,coal=10},600)
-eq(#t.losses,0)
+eq(t.elapsed,0); eq(#t.changes,0)
+t=m.trend(history,{iron=90,gold=30,coal=10},30)
+eq(t.elapsed,30); eq(t.minuteElapsed,30)
+eq(change(t,'iron').five,-10); eq(change(t,'gold').minute,10)
+m.trend(history,{iron=80,gold=30,coal=10},240)
+t=m.trend(history,{iron=60,gold=30,copper=40},300)
+eq(t.elapsed,300); eq(t.minuteElapsed,60)
+eq(change(t,'iron').five,-40); eq(change(t,'iron').minute,-20)
+eq(change(t,'coal').five,-10); eq(change(t,'coal').current,0)
+eq(change(t,'copper').five,40); eq(change(t,'copper').minute,40)
+t=m.trend(history,{iron=85,gold=30,coal=10},330)
+eq(t.elapsed,300); eq(t.minuteElapsed,90)
+eq(change(t,'iron').five,-5); eq(change(t,'iron').minute,5)
+-- Gains and losses between snapshots telescope to the endpoint net change.
+local oscillating={}
+m.trend(oscillating,{iron=100},0)
+m.trend(oscillating,{iron=150},120)
+m.trend(oscillating,{iron=140},240)
+t=m.trend(oscillating,{iron=120},300)
+eq(change(t,'iron').five,20); eq(change(t,'iron').minute,-20)
+-- A zero five-minute net must still appear when the one-minute net is nonzero.
+t=m.trend(oscillating,{iron=100},301)
+eq(change(t,'iron').five,0); eq(change(t,'iron').minute,-40)
 assert(m.trend(history,nil,610).unavailable); eq(#history.samples,0)
-eq(m.trend(history,{iron=1},620).remaining,300)
--- Clock moving backwards starts a new window.
-eq(m.trend(history,{iron=1},600).remaining,300)
+eq(m.trend(history,{iron=1},620).elapsed,0)
+eq(m.trend(history,{iron=1},600).elapsed,0)
 local bounded={}
 for i=0,1000 do m.trend(bounded,{iron=i},i) end
 eq(#bounded.samples,301)
--- Sampling jitter keeps the most recent baseline before the cutoff.
 local jitter={}
 m.trend(jitter,{iron=100},0); m.trend(jitter,{iron=95},7)
-t=m.trend(jitter,{iron=70},306); eq(t.losses[1].loss,30); eq(t.elapsed,306)
-t=m.trend(jitter,{iron=60},308); eq(t.losses[1].loss,35); eq(t.elapsed,301)
+t=m.trend(jitter,{iron=70},306); eq(change(t,'iron').five,-30); eq(t.elapsed,306)
+t=m.trend(jitter,{iron=60},308); eq(change(t,'iron').five,-35); eq(t.elapsed,301)
 local data={current=10,capacity=100,ratio=0.1,occupied=1,slots=2,
     trendSource='stock network',trendPage=0,
-    trend={remaining=0,elapsed=300,losses={}}}
-for i=1,20 do data.trend.losses[i]={name='minecraft:item_'..i,loss=i} end
-for _,size in ipairs({{51,19},{26,14},{26,10}}) do
+    trend={minuteElapsed=60,elapsed=300,changes={}}}
+for i=1,20 do data.trend.changes[i]={name='minecraft:item_'..i,minute=i,five=-i} end
+for _,size in ipairs({{51,19},{26,15},{26,10}}) do
     local target,lines=screen(size[1],size[2])
     m.draw(target,data,nil,true)
-    assert(lines[4]:find('item_1',1,true)); assert(lines[size[2]-1]:find('Page 1/',1,true))
+    assert(lines[5]:find('item_1',1,true)); assert(lines[5]:find('+1',1,true))
+    assert(lines[5]:find('-1',1,true)); assert(lines[size[2]-1]:find('| 1/',1,true))
     data.trendPage=1
     m.draw(target,data,nil,true)
-    assert(lines[size[2]-1]:find('Page 2/',1,true))
+    assert(lines[size[2]-1]:find('| 2/',1,true))
     data.trendPage=0
     m.draw(target,data,nil,false)
-    if size[2]>=14 then eq(lines[11],'NET LOSSES / LAST 5 MIN') end
+    if size[2]>=15 then eq(lines[11],'NET CHANGE / 1 MIN + 5 MIN') end
 end
-data.trend={remaining=123,losses={}}
 local target,lines=screen(26,10)
-m.draw(target,data,nil,true); eq(lines[4],'Collecting: 123s left')
-data.trend={remaining=0,losses={}}
-m.draw(target,data,nil,true); eq(lines[4],'No items decreasing')
+data.trend={minuteElapsed=30,elapsed=30,changes={{name='iron',minute=5,five=5}}}
+m.draw(target,data,nil,true)
+assert(lines[4]:find('30s',1,true)); assert(lines[5]:find('+5',1,true))
+data.trend={elapsed=0,minuteElapsed=0,changes={}}
+m.draw(target,data,nil,true); eq(lines[4],'Waiting for next snapshot')
+data.trend={elapsed=300,minuteElapsed=60,changes={}}
+m.draw(target,data,nil,true); eq(lines[5],'No net changes')
 data.trend={unavailable=true}
 m.draw(target,data,nil,true); eq(lines[4],'Trend data unavailable')
+data.trend={elapsed=300,minuteElapsed=60,changes={{name='iron',minute=12345678,five=-98765432}}}
+m.draw(target,data,nil,true)
+assert(lines[5]:find('+12.3M',1,true)); assert(lines[5]:find('-98.7M',1,true))
+data.trend.changes[1].minute=999999999
+m.draw(target,data,nil,true)
+assert(lines[5]:find('+999.9M',1,true))
 -- Verify actual sampling chooses ticker data and never falls back on failure.
 devices.a=vault(1,{{name='iron',count=10}},64)
 devices.ticker={stock=function() return {{name='gold',count=25}} end}

@@ -53,7 +53,7 @@ and update controls while the monitor displays the storage dashboard:
   The monitor keeps its last screen during configuration.
 - **U:** immediately check for and automatically install a newer release.
   Results appear on the terminal; requires the launcher.
-- **N:** toggle the monitor between summary and full losses list.
+- **N:** toggle the monitor between summary and full changes list.
 - **Q:** stop both the dashboard and updater.
 
 You can also run `storage/start.lua --run --configure` or
@@ -72,7 +72,7 @@ You can also run `storage/start.lua --run --configure` or
 Settings are saved beside the program in `<program-name>.cfg`. Run
 `stock_monitor --configure` after adding/removing vaults or changing networks.
 Run `stock_monitor --list` to inspect peripheral names and methods.
-Press **N** on the computer to switch between the summary and the full losses
+Press **N** on the computer to switch between the summary and the full changes
 list; press **C** to configure again and **Q** to quit. Use the installer and
 launcher above for automatic startup and update checks.
 
@@ -80,8 +80,8 @@ The ticker must expose `stock()`. If your installed Create integration lacks
 this method, choose 0 for the ticker to use the vault display alone.
 Vaults must expose `size()`, `list()`, and `getItemLimit()`.
 A **3-block-wide by 2-block-high monitor** is supported: the program uses compact
-text so totals, the capacity gauge, and the five-minute losses appear together.
-Long loss lists automatically cycle pages. Monitor text scale stays at 0.5;
+text so totals, the capacity gauge, and the net changes appear together.
+Long change lists automatically cycle pages. Monitor text scale stays at 0.5;
 it is not toggled on redraw. Layout uses the actual character dimensions
 reported by the monitor. The minimum is 26 columns by 10 rows.
 Storage reads, monitor drawing, and terminal input run as three independent
@@ -122,36 +122,43 @@ differ while items are moving.
 API references: [Create Stock Ticker](https://wiki.createmod.net/users/cc-tweaked-integration/logistics/stock-ticker)
 and [CC: Tweaked inventory](https://tweaked.cc/generic_peripheral/inventory.html).
 
-## Five-minute decreases
+## One-minute and five-minute net changes
 
-The **NET LOSSES / LAST 5 MIN** list shows items whose current stock is lower
-than it was approximately five minutes ago, sorted by largest loss first.
-For example, `minecraft:iron_ingot -240` means there are 240 fewer ingots than
-at the start of the window. Production and consumption offset each other:
-this is net stock change, not a measurement of gross consumption.
+The **NET CHANGE / 1 MIN + 5 MIN** table shows a signed item-count change for
+both windows. Gains are green with `+`, losses red with `-`, and unchanged values
+show `0`. Items appear if either window changed, ordered by the largest absolute
+change across the two windows. Newly appearing items start from zero; items that
+disappear completely end at zero.
+
+For example, iron can show **+20** over one minute and **-240** over five minutes.
+Each window compares the current snapshot with the latest sample at or before its
+boundary (60 or 300 seconds ago). This equals adding the consecutive changes
+between snapshots in that window: production and consumption offset each other.
+It does not measure gross production or consumption.
+
+Changes appear from the second snapshot onward. Until enough history exists,
+each column uses the oldest available snapshot and labels the shorter duration,
+such as `30s` instead of `1 min` or `5 min`. The footer shows the actual duration
+of both windows; sampling intervals can make mature windows slightly longer than
+60/300 seconds. Large values use compact `k`, `M`, `B`, or `T` notation as needed.
 
 Trends use the Stock Ticker's entire network when configured, otherwise the
 selected vaults. Counts are grouped by registry item name (NBT variants are
-combined). Items that disappear completely are counted as zero. Positive or
-unchanged items are omitted.
-
-The first result requires five minutes of successful readings. The rolling
-per-item snapshots are saved after each scan in `<program-name>.history`, beside
-the configuration. Writes use a temporary file and retain a `.bak` copy for
-interrupted-write recovery. This is the recent five-minute window, not an
-unbounded lifetime log. The program reports history write failures on the monitor.
+combined). The rolling per-item snapshots are saved after each scan in
+`<program-name>.history`, beside the configuration. Writes use a temporary file
+and retain a `.bak` copy for interrupted-write recovery. This is the recent
+five-minute window, not an unbounded lifetime log. History write failures are
+reported on the monitor.
 
 Recent history is reloaded after a restart or automatic update. History resets
 when the latest saved reading is more than 60 seconds old, the stock source or
 vault selection changes, the clock moves backwards, or a storage/ticker read
-fails. A failed ticker never silently switches the trend to vault-only data. The rolling
-baseline is the latest sample at or before five minutes ago; scan timing means
-the actual window may be slightly longer and is shown alongside the page number.
+fails. A failed ticker never silently switches the trend to vault-only data.
 
-Screens with at least 14 rows show losses below the gauge. Press **N** for a
-full-screen list on any supported screen. Long lists cycle pages every roughly
-10 seconds, advancing on refresh. Missing data and the initial collection period
-are labeled explicitly.
+Screens with at least 15 rows show the changes table below the gauge. Press **N**
+for a full-screen table on any supported screen. Long lists cycle pages every
+roughly 10 seconds, advancing on refresh. Missing data and the initial wait for
+a second snapshot are labeled explicitly.
 
 ## Local checks
 
