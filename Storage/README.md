@@ -81,10 +81,18 @@ this method, choose 0 for the ticker to use the vault display alone.
 Vaults must expose `size()`, `list()`, and `getItemLimit()`.
 A **3-block-wide by 2-block-high monitor** is supported: the program uses compact
 text so totals, the capacity gauge, and the five-minute losses appear together.
-Long loss lists automatically cycle pages. Larger monitors use text scale 1 when
-at least 38 columns and 18 rows fit, otherwise scale 0.5. Layout uses the actual
-character dimensions reported by the monitor. The minimum is 26 columns by 10 rows.
-Refreshes occur five seconds after each scan; large inventories can take longer.
+Long loss lists automatically cycle pages. Monitor text scale stays at 0.5;
+it is not toggled on redraw. Layout uses the actual character dimensions
+reported by the monitor. The minimum is 26 columns by 10 rows.
+Storage reads, monitor drawing, and terminal input run as three independent
+cooperative tasks. Slow peripheral reads do not block terminal controls. Refreshes
+occur five seconds after each completed scan. Capacity reads run in batches of
+up to 32 slots and are cached for five minutes; size changes, storage reconnects,
+read failures, and reconfiguration invalidate the cache. Item counts are read on
+every scan. Monitor resize events only redraw the screen and never rescan storage.
+
+Setup saves selections immediately before the first scan. A loading screen shows
+scan progress, and restarting during this scan retains the saved configuration.
 
 ## Meaning of the readings
 

@@ -1,4 +1,4 @@
--- stock-monitor-version: 1.0.0
+-- stock-monitor-version: 1.0.1
 -- Create Stock Ticker + Item Vault dashboard for CC: Tweaked.
 -- Run stock_monitor --configure to choose peripherals again.
 local M = {}
@@ -123,7 +123,27 @@ function M.saveHistory(path, config, history)
     end
 end
 
-function M.sample(config, wrap)
+function M.capacity(vault, slots, progress)
+    local total = 0
+    -- Queue a bounded batch of peripheral reads together instead of waiting a
+    -- server tick for every individual slot. Works with nonuniform inventories.
+    for first = 1, slots, 32 do
+        local calls = {}
+        for slot = first, math.min(slots, first + 31) do
+            local index = slot
+            calls[#calls + 1] = function()
+                local limit = number(vault.getItemLimit(index), "slot limit")
+                total = total + limit
+            end
+        end
+        if parallel and parallel.waitForAll then parallel.waitForAll(table.unpack(calls))
+        else for _, call in ipairs(calls) do call() end end
+        if progress then progress(math.min(slots, first + 31), slots) end
+    end
+    return total
+end
+
+function M.sample(config, wrap, cache, progress)
     local result = { current = 0, capacity = 0, slots = 0, occupied = 0, vaultItems = {} }
     local seen = {}
     assert(#config.vaults > 0, "No vaults configured; run --configure")
@@ -134,9 +154,16 @@ function M.sample(config, wrap)
         assert(vault.size and vault.list and vault.getItemLimit,
             "Inventory API missing: " .. name)
         local slots = number(vault.size(), "slot count")
-        local capacity = 0
-        for slot = 1, slots do
-            capacity = capacity + number(vault.getItemLimit(slot), "slot limit")
+        local saved = cache and cache[name]
+        local now = os.epoch and os.epoch("utc") / 1000 or 0
+        local capacity
+        if saved and saved.slots == slots and now >= saved.time and now - saved.time < 300 then
+            capacity = saved.capacity
+        else
+            capacity = M.capacity(vault, slots, progress and function(done, count)
+                progress(name, done, count)
+            end)
+            if cache then cache[name] = { slots = slots, capacity = capacity, time = now } end
         end
         local items = vault.list()
         local current, occupied = M.count(items)
@@ -170,12 +197,29 @@ function M.format(value)
     return digits:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
 end
 
--- Keep totals and at least five loss rows visible together. A 3x2 monitor
--- uses the compact scale; larger monitors can use more readable text.
+-- Do not toggle between scales on each redraw: setTextScale queues resize
+-- events, so toggling it causes a self-sustaining refresh/clear loop.
 function M.fitMonitor(target)
-    target.setTextScale(1)
+    if not target.getTextScale or target.getTextScale() ~= 0.5 then
+        target.setTextScale(0.5)
+    end
+end
+
+function M.loading(target, message)
     local w, h = target.getSize()
-    if w < 38 or h < 18 then target.setTextScale(0.5) end
+    target.setBackgroundColor(colors.black)
+    target.setTextColor(colors.white)
+    target.clear()
+    target.setCursorPos(1, 1)
+    target.write(("READING VAULT STORAGE"):sub(1, w))
+    if h >= 3 then
+        target.setCursorPos(1, 3)
+        target.write(message:sub(1, w))
+    end
+    if h >= 5 then
+        target.setCursorPos(1, 5)
+        target.write(("Please wait; Ctrl+T cancels"):sub(1, w))
+    end
 end
 
 function M.draw(target, data, problem, trendView)
@@ -340,8 +384,8 @@ local function configure(path)
         if valid then config.vaults = selection end
         if #config.vaults == 0 then print("Enter valid vault numbers.") end
     end
-    -- Validate before saving; no incomplete totals are accepted.
-    M.sample(config, peripheral.wrap)
+    -- Save selections immediately. The dashboard owns the first scan and
+    -- reports progress/errors; setup must not silently scan everything twice.
     local file = assert(fs.open(path, "w"), "Cannot write " .. path)
     file.write(textutils.serialize(config))
     file.close()
@@ -382,74 +426,145 @@ function M.main(args, services)
     local terminal = term.current()
     local historyPath = program .. ".history"
     local history = M.loadHistory(historyPath, config, os.epoch("utc") / 1000)
-    local trendView = false
-    local lastData, lastProblem, externalDisplay
-    local function console()
-        if externalDisplay then
-            M.drawConsole(terminal, lastData, lastProblem, config, services.updateStatus)
-        end
+    local trendView, revision = false, 0
+    local capacityCache = {}
+    local lastData, lastProblem, displayError
+    local scanStatus = "Starting first scan..."
+    local function notify() os.queueEvent("stock_monitor_display") end
+    local function draw(target)
+        if not lastData and not lastProblem then M.loading(target, scanStatus)
+        else M.draw(target, lastData, lastProblem, trendView) end
     end
-    local function refresh()
-        local ok, result = pcall(M.sample, config, peripheral.wrap)
-        if not ok and result == "Terminated" then error(result, 0) end
-        local now = os.epoch("utc") / 1000
-        local trend = M.trend(history, ok and result.trendItems or nil, now)
-        local saved, saveError = pcall(M.saveHistory, historyPath, config, history)
-        if not saved and saveError == "Terminated" then error(saveError, 0) end
-        if ok then
-            result.historyError = not saved and tostring(saveError) or nil
-            result.trend = trend
-            result.trendSource = config.ticker and "stock network" or "selected vaults"
-            result.trendPage = math.floor(now / 10)
-        end
-        local target = config.monitor and peripheral.wrap(config.monitor) or terminal
-        if not target then target = terminal end
-        local drawn = pcall(function()
-            if target ~= terminal then M.fitMonitor(target) end
-            M.draw(target, ok and result or nil, not ok and result or nil, trendView)
-        end)
-        externalDisplay = drawn and target ~= terminal
-        lastData, lastProblem = ok and result or nil, not ok and result or nil
-        if not drawn then M.draw(terminal, nil, "Monitor disconnected; retrying") end
-        console()
-    end
-    refresh()
-    local timer = os.startTimer(config.interval)
-    while true do
-        local event, value = os.pullEvent()
-        if event == "char" and value:lower() == "q" then break end
-        if event == "stock_monitor_status" then console() end
-        if event == "char" and value:lower() == "u" then
-            if services.requestUpdate then services.requestUpdate()
-            else services.updateStatus = "Updates require the launcher: storage/start.lua --run" end
-            console()
-        end
-        if event == "char" and value:lower() == "c" then
-            services.configuring = true
-            terminal.clear(); terminal.setCursorPos(1, 1)
-            local configured, nextConfig = pcall(configure, path)
-            services.configuring = false
-            os.queueEvent("stock_monitor_configured")
-            if not configured and nextConfig == "Terminated" then error(nextConfig, 0) end
-            if configured then
-                config = nextConfig
-                history = M.loadHistory(historyPath, config, os.epoch("utc") / 1000)
-            else
-                services.updateStatus = "Configuration failed: " .. tostring(nextConfig)
+    local function storageTask()
+        while true do
+            while services.configuring do os.pullEvent("stock_monitor_configured") end
+            local generation = revision
+            scanStatus = "Reading stock..."; notify()
+            local ok, result = pcall(M.sample, config, peripheral.wrap, capacityCache, function(name, done, total)
+                if generation == revision then
+                    scanStatus = name .. ": " .. done .. "/" .. total .. " slots"
+                    notify()
+                end
+            end)
+            if not ok and result == "Terminated" then error(result, 0) end
+            -- A configuration change can happen while a peripheral call yields.
+            -- Never publish old-scope totals or history into the new selection.
+            if generation == revision and not services.configuring then
+                local now = os.epoch("utc") / 1000
+                local trend = M.trend(history, ok and result.trendItems or nil, now)
+                local saved, saveError = pcall(M.saveHistory, historyPath, config, history)
+                if not saved and saveError == "Terminated" then error(saveError, 0) end
+                if ok then
+                    result.historyError = not saved and tostring(saveError) or nil
+                    result.trend = trend
+                    result.trendSource = config.ticker and "stock network" or "selected vaults"
+                    result.trendPage = math.floor(now / 10)
+                else
+                    capacityCache = {}
+                end
+                lastData, lastProblem = ok and result or nil, not ok and result or nil
+                scanStatus = ok and "Storage scan complete" or "Storage read failed; retrying"
+                notify()
+                local timer = os.startTimer(config.interval)
+                while true do
+                    local event, id = os.pullEvent()
+                    if (event == "timer" and id == timer) or event == "stock_monitor_rescan" then break end
+                end
+                os.cancelTimer(timer)
             end
-            os.cancelTimer(timer)
-            refresh()
-            timer = os.startTimer(config.interval)
-        end
-        if event == "char" and value:lower() == "n" then trendView = not trendView end
-        if (event == "char" and value:lower() == "n") or (event == "timer" and value == timer) or event == "peripheral"
-            or event == "peripheral_detach" or event == "monitor_resize"
-            or event == "term_resize" then
-            os.cancelTimer(timer)
-            refresh()
-            timer = os.startTimer(config.interval)
         end
     end
+    local function monitorTask()
+        while true do
+            local target = config.monitor and peripheral.wrap(config.monitor)
+            local previousError = displayError
+            displayError = nil
+            if target then
+                local ok, reason = pcall(function()
+                    M.fitMonitor(target)
+                    draw(target)
+                end)
+                if not ok then
+                    if reason == "Terminated" then error(reason, 0) end
+                    displayError = tostring(reason)
+                end
+            elseif config.monitor then
+                displayError = "Monitor disconnected"
+            end
+            if displayError ~= previousError then os.queueEvent("stock_monitor_status") end
+            while true do
+                local event, name = os.pullEvent()
+                if event == "stock_monitor_display"
+                    or (event == "monitor_resize" and name == config.monitor)
+                    or ((event == "peripheral" or event == "peripheral_detach") and name == config.monitor) then break end
+            end
+        end
+    end
+    local function terminalTask()
+        local function render()
+            if config.monitor and peripheral.wrap(config.monitor) and not displayError then
+                M.drawConsole(terminal, lastData, lastProblem, config, services.updateStatus)
+                local w, h = terminal.getSize()
+                if h >= 6 then
+                    terminal.setCursorPos(1, 6)
+                    terminal.write(scanStatus:sub(1, w))
+                end
+            else
+                draw(terminal)
+                local w, h = terminal.getSize()
+                terminal.setCursorPos(1, h)
+                terminal.write(("C: setup U: update N: view Q: quit"):sub(1, w))
+            end
+        end
+        render()
+        while true do
+            local event, value = os.pullEvent()
+            if event == "char" then
+                local key = value:lower()
+                if key == "q" then return end
+                if key == "u" then
+                    if services.requestUpdate then services.requestUpdate()
+                    else services.updateStatus = "Updates require the launcher: storage/start.lua --run" end
+                elseif key == "n" then
+                    trendView = not trendView; notify()
+                elseif key == "c" then
+                    services.configuring = true
+                    revision = revision + 1
+                    terminal.clear(); terminal.setCursorPos(1, 1)
+                    local configured, nextConfig = pcall(configure, path)
+                    if not configured and nextConfig == "Terminated" then error(nextConfig, 0) end
+                    if configured then
+                        config = nextConfig
+                        capacityCache = {}
+                        history = M.loadHistory(historyPath, config, os.epoch("utc") / 1000)
+                        lastData, lastProblem = nil, nil
+                    else
+                        services.updateStatus = "Configuration failed: " .. tostring(nextConfig)
+                    end
+                    scanStatus = "Starting scan..."
+                    services.configuring = false
+                    os.queueEvent("stock_monitor_configured")
+                    os.queueEvent("stock_monitor_rescan")
+                    notify()
+                end
+                render()
+            elseif event == "peripheral" or event == "peripheral_detach" then
+                local storageChanged = value == config.ticker
+                for _, name in ipairs(config.vaults) do
+                    if value == name then storageChanged = true end
+                end
+                if storageChanged then
+                    capacityCache = {}; revision = revision + 1
+                    os.queueEvent("stock_monitor_rescan")
+                end
+                render()
+            elseif event == "stock_monitor_display" or event == "stock_monitor_status"
+                or event == "term_resize" then render() end
+        end
+    end
+    -- Each UI owns its own output device. Only the storage task samples and
+    -- persists history; monitor/terminal events cannot trigger extra scans.
+    parallel.waitForAny(monitorTask, terminalTask, storageTask)
     terminal.setBackgroundColor(colors.black)
     terminal.setTextColor(colors.white)
     terminal.clear()

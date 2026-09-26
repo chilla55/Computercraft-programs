@@ -196,7 +196,9 @@ print('Updates: verification, rollback, install, launcher, manual checks, and pe
 -- Run the real dashboard event loop through manual update and reconfiguration.
 colors={black=1,white=2,cyan=3,red=4,orange=5,lime=6,lightGray=7}
 local function display()
-    return {getSize=function() return 51,19 end,setTextScale=function() end,
+    local scale=1
+    return {getSize=function() return 51,19 end,
+        getTextScale=function() return scale end,setTextScale=function(v) scale=v; os.queueEvent('monitor_resize','display') end,
         setBackgroundColor=function() end,setTextColor=function() end,
         clear=function() end,setCursorPos=function() end,write=function() end}
 end
@@ -212,19 +214,77 @@ peripheral={wrap=function(name) return peripheralDevices[name] end,
     getNames=function() return {'a','ticker','display'} end,
     hasType=function(name,kind) return name=='display' and kind=='monitor' end}
 files[path..'.cfg']=serialize({vaults={'a'},ticker='ticker',monitor='display',interval=5})
-local timerCount,manualCount=0,0
+local timerCount,manualCount,capacityReads=0,0,0
 os.startTimer=function(seconds) eq(seconds,5); timerCount=timerCount+1; return timerCount end
 os.cancelTimer=function() end
-local events={{'char','u'},{'char','c'},{'timer',2},{'char','q'}}
-os.pullEvent=function() local event=table.remove(events,1); assert(event); return table.unpack(event) end
+local pending={}
+os.queueEvent=function(...) pending[#pending+1]={...} end
+os.pullEvent=function(filter) return coroutine.yield(filter) end
+peripheralDevices.a.getItemLimit=function()
+    capacityReads=capacityReads+1
+    os.pullEvent('capacity_ready') -- simulate slow server-side inventory call
+    return 64
+end
+local scripted={{'char','u'},{'monitor_resize','display'},{'capacity_ready'},
+    {'char','c'},{'capacity_ready'},{'timer',2},{'char','q'}}
+parallel.waitForAny=function(...)
+    local threads,filters={},{}
+    local function resume(i,...)
+        local ok,result=coroutine.resume(threads[i],...)
+        assert(ok,result); filters[i]=result
+        return coroutine.status(threads[i])=='dead'
+    end
+    for i,fn in ipairs({...}) do
+        threads[i]=coroutine.create(fn)
+        if resume(i) then return i end
+    end
+    for step=1,200 do
+        local event=table.remove(pending,1)
+        if not event then
+            event=table.remove(scripted,1); assert(event,'Tasks stalled')
+            if event[1]=='capacity_ready' then
+                eq(manualCount,1) -- U worked before the slow scan completed
+            end
+        end
+        for i in ipairs(threads) do
+            if not filters[i] or filters[i]==event[1] then
+                if resume(i,table.unpack(event)) then return i end
+            end
+        end
+    end
+    error('Event storm: probable monitor resize loop')
+end
 read=function() return '1' end
 write=function() end
 local services={program=path,requestUpdate=function() manualCount=manualCount+1 end}
 monitor.main({},services)
 eq(manualCount,1); eq(timerCount,3); eq(services.configuring,false)
+eq(capacityReads,2) -- first scan and configuration change, not resize or timer
 assert(decode(files[path..'.cfg']).monitor=='display')
 assert(decode(files[path..'.history']).schema==1)
-print('Dashboard configuration, manual update controls, refresh restart, and history saving passed')
+print('Parallel terminal input during slow reads, resize isolation, configuration and history passed')
+
+-- Reconfiguration during an in-flight read discards that old generation.
+files[path..'.history']=nil; files[path..'.history.bak']=nil
+pending={}; scripted={{'char','c'},{'capacity_ready'},{'char','q'}}
+read=function() return '1' end
+monitor.main({}, {program=path})
+assert(not files[path..'.history'],'Old-scope scan was saved after configuration changed')
+
+-- First setup persists before any capacity read finishes, and restart does
+-- not ask for selections again even if the first scan was interrupted.
+files[path..'.cfg']=nil
+pending={}; scripted={{'char','q'}}
+local answers=0
+read=function() answers=answers+1; return '1' end
+monitor.main({}, {program=path})
+eq(answers,3)
+assert(decode(files[path..'.cfg']).vaults[1]=='a')
+pending={}; scripted={{'char','q'}}
+read=function() error('Restart must reuse the saved configuration') end
+monitor.main({}, {program=path})
+eq(answers,3)
+print('Setup saved before slow first scan; restart reuses configuration')
 
 -- Startup is installed by default; explicit opt-out and old opt-in both work.
 local realInstall=updater.install

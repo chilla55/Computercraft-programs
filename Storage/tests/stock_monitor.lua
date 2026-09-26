@@ -125,3 +125,33 @@ assert(controlLines[18]:find('C: configure',1,true))
 assert(controlLines[18]:find('U: check updates',1,true))
 eq(controlLines[8],'Up to date')
 print('Computer control-panel layout checks passed')
+
+-- Repeated paints must not keep changing scale and generating resize events.
+local scale,changes=1,0
+local sized={getTextScale=function() return scale end,
+    setTextScale=function(value) scale=value; changes=changes+1 end}
+for i=1,10 do m.fitMonitor(sized) end
+eq(scale,0.5); eq(changes,1)
+-- Capacity cache avoids repeated slot calls but refreshes on size/expiry.
+local slotCalls,slots=0,100
+local inventory={size=function() return slots end,list=function() return {} end,
+    getItemLimit=function(slot) slotCalls=slotCalls+1; return slot%2==0 and 16 or 64 end}
+local now=1000
+os.epoch=function() return now*1000 end
+local cache={}
+local configuration={vaults={'test'}}
+local function get() return inventory end
+local sampled=m.sample(configuration,get,cache)
+eq(sampled.capacity,4000); eq(slotCalls,100)
+m.sample(configuration,get,cache); eq(slotCalls,100)
+slots=101
+m.sample(configuration,get,cache); eq(slotCalls,201)
+now=1300
+m.sample(configuration,get,cache); eq(slotCalls,302)
+local batches=0
+parallel={waitForAll=function(...)
+    local workers={...}; assert(#workers<=32); batches=batches+1
+    for _,worker in ipairs(workers) do worker() end
+end}
+eq(m.capacity(inventory,100),4000); eq(batches,4)
+print('Stable monitor scale and bounded/cached capacity reads passed')
