@@ -79,9 +79,9 @@ launcher above for automatic startup and update checks.
 The ticker must expose `stock()`. If your installed Create integration lacks
 this method, choose 0 for the ticker to use the vault display alone.
 Vaults must expose `size()`, `list()`, and `getItemLimit()`.
-A **3-block-wide by 2-block-high monitor** is supported: the program uses compact
-text so totals, the capacity gauge, and the net changes appear together.
-Long change lists automatically cycle pages. Monitor text scale stays at 0.5;
+A **3-block-wide by 2-block-high monitor** is supported: the program uses a compact
+layout so totals, the capacity gauge, and net changes appear together.
+Long change lists automatically cycle pages. Monitor text scale stays at 1.0 (twice the original text size);
 it is not toggled on redraw. Layout uses the actual character dimensions
 reported by the monitor. The minimum is 26 columns by 10 rows.
 Storage reads, monitor drawing, and terminal input run as three independent
@@ -155,7 +155,8 @@ when the latest saved reading is more than 60 seconds old, the stock source or
 vault selection changes, the clock moves backwards, or a storage/ticker read
 fails. A failed ticker never silently switches the trend to vault-only data.
 
-Screens with at least 15 rows show the changes table below the gauge. Press **N**
+Screens with 11–14 rows use a compact overview with the changes table below the
+gauge. Screens with at least 15 rows also show slot usage and the capacity note. Press **N**
 for a full-screen table on any supported screen. Long lists cycle pages every
 roughly 10 seconds, advancing on refresh. Missing data and the initial wait for
 a second snapshot are labeled explicitly.

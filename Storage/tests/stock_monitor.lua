@@ -153,11 +153,11 @@ eq(controlLines[8],'Up to date')
 print('Computer control-panel layout checks passed')
 
 -- Repeated paints must not keep changing scale and generating resize events.
-local scale,changes=1,0
+local scale,changes=0.5,0
 local sized={getTextScale=function() return scale end,
     setTextScale=function(value) scale=value; changes=changes+1 end}
 for i=1,10 do m.fitMonitor(sized) end
-eq(scale,0.5); eq(changes,1)
+eq(scale,1.0); eq(changes,1)
 -- Capacity cache avoids repeated slot calls but refreshes on size/expiry.
 local slotCalls,slots=0,100
 local inventory={size=function() return slots end,list=function() return {} end,
@@ -181,3 +181,22 @@ parallel={waitForAll=function(...)
 end}
 eq(m.capacity(inventory,100),4000); eq(batches,4)
 print('Stable monitor scale and bounded/cached capacity reads passed')
+
+-- Doubled-size 3x2 layout retains counts, capacity, gauge and both net columns.
+local compact,compactLines=screen(29,12)
+m.draw(compact,{current=5000,capacity=10000,ratio=0.5,occupied=100,slots=200,
+    network=6000,trendPage=0,
+    trend={elapsed=300,minuteElapsed=60,changes={
+        {name='minecraft:iron_ingot',minute=10,five=-100},
+        {name='minecraft:gold_ingot',minute=-5,five=50},
+        {name='minecraft:copper_ingot',minute=2,five=20},
+    }}},nil,false)
+eq(compactLines[1],'VAULTS / 50.0% FULL')
+eq(compactLines[2],'Network: 6,000')
+eq(compactLines[3],'Items:   5,000')
+eq(compactLines[4],'Maximum: 10,000')
+eq(compactLines[6]:sub(1,1),'0'); eq(compactLines[6]:sub(-6),'10,000')
+assert(compactLines[8]:find('1 min',1,true)); assert(compactLines[8]:find('5 min',1,true))
+assert(compactLines[9]:find('iron_ingot',1,true)); assert(compactLines[9]:find('+10',1,true))
+assert(compactLines[9]:find('-100',1,true)); assert(compactLines[11]:find('1/2',1,true))
+print('Doubled text scale and compact 3x2 dashboard checks passed')

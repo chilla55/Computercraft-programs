@@ -1,4 +1,4 @@
--- stock-monitor-version: 1.0.2
+-- stock-monitor-version: 1.0.3
 -- Create Stock Ticker + Item Vault dashboard for CC: Tweaked.
 -- Run stock_monitor --configure to choose peripherals again.
 local M = {}
@@ -211,8 +211,8 @@ end
 -- Do not toggle between scales on each redraw: setTextScale queues resize
 -- events, so toggling it causes a self-sustaining refresh/clear loop.
 function M.fitMonitor(target)
-    if not target.getTextScale or target.getTextScale() ~= 0.5 then
-        target.setTextScale(0.5)
+    if not target.getTextScale or target.getTextScale() ~= 1.0 then
+        target.setTextScale(1.0)
     end
 end
 
@@ -249,7 +249,9 @@ function M.draw(target, data, problem, trendView)
         line(2, "Need 26 x 10 characters")
         return
     end
-    line(1, "STOCK NETWORK / VAULTS", colors.cyan)
+    if problem or trendView or h < 11 or h >= 15 then
+        line(1, "STOCK NETWORK / VAULTS", colors.cyan)
+    end
     if problem then
         line(3, "VAULT DATA UNAVAILABLE", colors.red)
         local message = tostring(problem)
@@ -267,7 +269,7 @@ function M.draw(target, data, problem, trendView)
         elseif trend.elapsed == 0 then
             line(top + 1, "Waiting for next snapshot", colors.lightGray)
         else
-            local column = math.max(7, math.min(14, math.floor((w - 8) / 2)))
+            local column = math.max(7, math.min(14, math.floor(w / 4)))
             local nameWidth = w - 2 * column - 2
             local function row(y, name, minute, five, minuteColor, fiveColor)
                 line(y, name:sub(1, nameWidth)
@@ -318,6 +320,23 @@ function M.draw(target, data, problem, trendView)
     if trendView then
         line(2, "Source: " .. (data.trendSource or "network"), colors.lightGray)
         changes(3)
+        return
+    end
+    -- The 3x2 monitor has fewer rows at the larger text scale. Keep the
+    -- essential totals, full-range gauge and both change columns on one screen.
+    if h >= 11 and h < 15 then
+        local color = data.ratio >= 0.9 and colors.red
+            or data.ratio >= 0.75 and colors.orange or colors.lime
+        if data.historyError then line(1, "History save failed", colors.orange)
+        else line(1, string.format("VAULTS / %.1f%% FULL", data.ratio * 100), color) end
+        line(2, "Network: " .. (data.network and M.format(data.network) or "unavailable"))
+        line(3, "Items:   " .. M.format(data.current))
+        line(4, "Maximum: " .. M.format(data.capacity))
+        local filled = math.floor(math.max(0, math.min(1, data.ratio)) * (w - 2))
+        line(5, "[" .. string.rep("#", filled) .. string.rep("-", w - 2 - filled) .. "]", color)
+        local maximum = M.format(data.capacity)
+        line(6, "0" .. string.rep(" ", math.max(1, w - #maximum - 1)) .. maximum)
+        changes(7)
         return
     end
     line(2, "Network: " .. (data.network and M.format(data.network) or "unavailable"))
