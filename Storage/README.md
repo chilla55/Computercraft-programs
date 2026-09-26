@@ -55,8 +55,13 @@ mode when the monitor is disconnected):
   The monitor keeps its last screen during configuration.
 - **U:** immediately check for and automatically install a newer release.
   Results appear on the terminal; requires the launcher.
-- **N:** toggle the monitor between summary and full changes list.
+- **N:** toggle the monitor between summary and full changes list (computer keyboard).
 - **Q:** stop both the dashboard and updater.
+
+On the monitor, tap **Show changes** or **Show summary** in the bottom row to
+switch views. Only taps within the button on the selected monitor are handled.
+The monitor shows no keyboard shortcuts; configuration, updates, and quit controls
+remain on the computer terminal. Fill percentage appears only below the gauge.
 
 You can also run `storage/start.lua --run --configure` or
 `storage/start.lua --run --list` for configuration or peripheral diagnostics.
@@ -177,8 +182,8 @@ vault selection changes, the clock moves backwards, or a storage/ticker read
 fails. A failed ticker never silently switches the trend to vault-only data.
 
 Screens with 11–14 rows use a compact overview with the changes table below the
-gauge. Screens with at least 15 rows also show slot usage and the capacity note. Press **N**
-for a full-screen table on any supported screen. Long lists cycle pages every
+gauge. Screens with at least 15 rows also show slot usage and the capacity note. Tap **Show changes** on the monitor (or press **N** on the computer)
+for a full-screen table. Long lists cycle pages every
 roughly 10 seconds, advancing on refresh. Missing data and the initial wait for
 a second snapshot are labeled explicitly.
 

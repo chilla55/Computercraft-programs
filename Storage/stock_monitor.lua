@@ -1,7 +1,7 @@
--- stock-monitor-version: 1.0.6
+-- stock-monitor-version: 1.0.7
 -- Create Stock Ticker + Item Vault dashboard for CC: Tweaked.
 -- Run stock_monitor --configure to choose peripherals again.
-local M = { version = "1.0.6" }
+local M = { version = "1.0.7" }
 
 local function number(value, label)
     assert(type(value) == "number" and value >= 0 and value < math.huge
@@ -310,8 +310,19 @@ function M.loading(target, message)
     end
     if h >= 5 then
         target.setCursorPos(1, 5)
-        target.write(("Please wait; Ctrl+T cancels"):sub(1, w))
+        target.write(("Please wait..."):sub(1, w))
     end
+end
+
+function M.viewButton(w, h, trendView)
+    local label = trendView and "[ Show summary ]" or "[ Show changes ]"
+    return math.max(1, math.floor((w - #label) / 2) + 1), h, label
+end
+
+function M.isViewTouch(w, h, x, y, trendView)
+    if w < 26 or h < 10 then return false end
+    local left, row, label = M.viewButton(w, h, trendView)
+    return type(x) == "number" and y == row and x >= left and x < left + #label
 end
 
 function M.draw(target, data, problem, trendView)
@@ -324,6 +335,10 @@ function M.draw(target, data, problem, trendView)
         target.setCursorPos(1, y)
         target.setTextColor(color or colors.white)
         target.write(text:sub(1, w))
+    end
+    local function viewButton()
+        local x, y, label = M.viewButton(w, h, trendView)
+        line(y, string.rep(" ", x - 1) .. label, colors.cyan)
     end
     if w < 26 or h < 10 then
         line(1, "Display too small")
@@ -339,7 +354,7 @@ function M.draw(target, data, problem, trendView)
         for y = 4, h - 1 do
             line(y, message:sub((y - 4) * w + 1, (y - 3) * w), colors.orange)
         end
-        line(h, "Retrying... Q: quit")
+        line(h, "Retrying automatically...")
         return
     end
     local function changes(top)
@@ -396,7 +411,7 @@ function M.draw(target, data, problem, trendView)
             end
             line(h - 1, string.format("1m:%.0fs 5m:%.0fs | %d/%d", trend.minuteElapsed, trend.elapsed, page + 1, pages), colors.lightGray)
         end
-        line(h, "N: " .. (trendView and "summary" or "changes") .. " / Q: quit", colors.lightGray)
+        viewButton()
     end
     if trendView then
         line(2, "Source: " .. (data.trendSource or "network"), colors.lightGray)
@@ -409,7 +424,7 @@ function M.draw(target, data, problem, trendView)
         local color = data.ratio >= 0.9 and colors.red
             or data.ratio >= 0.75 and colors.orange or colors.lime
         if data.historyError then line(1, "History save failed", colors.orange)
-        else line(1, string.format("VAULTS / %.1f%% FULL", data.ratio * 100), color) end
+        else line(1, "VAULT STORAGE", colors.cyan) end
         line(2, "Non-vault: " .. (data.nonVault and ("~" .. M.format(data.nonVault)) or "unavailable"))
         line(3, "Vault items: " .. M.format(data.current))
         line(4, "Vault max: " .. M.format(data.capacity))
@@ -425,7 +440,6 @@ function M.draw(target, data, problem, trendView)
     line(4, "Vault max: " .. M.format(data.capacity))
     local color = data.ratio >= 0.9 and colors.red
         or data.ratio >= 0.75 and colors.orange or colors.lime
-    line(5, string.format("Vault fill: %.1f%%", data.ratio * 100), color)
     local filled = math.floor(math.max(0, math.min(1, data.ratio)) * (w - 2))
     line(6, "[" .. string.rep("#", filled) .. string.rep("-", w - 2 - filled) .. "]", color)
     local percentage = string.format("%.1f%% full", data.ratio * 100)
@@ -437,11 +451,9 @@ function M.draw(target, data, problem, trendView)
     elseif data.historyError then
         line(10, "History save failed", colors.orange)
     elseif data.networkError then
-        line(10, "Ticker unavailable; Q: quit", colors.orange)
-    else
-        line(10, "N: changes / Q: quit", colors.lightGray)
+        line(10, "Ticker unavailable", colors.orange)
     end
-    if h >= 15 then changes(11) end
+    if h >= 15 then changes(11) else viewButton() end
 end
 
 function M.terminalHeading(target, title)
@@ -648,7 +660,16 @@ function M.main(args, services)
             end
             if displayError ~= previousError then os.queueEvent("stock_monitor_status") end
             while true do
-                local event, name = os.pullEvent()
+                local event, name, x, y = os.pullEvent()
+                if event == "monitor_touch" and name == config.monitor
+                    and lastData and not lastProblem and target then
+                    local sized, w, h = pcall(target.getSize)
+                    if sized and M.isViewTouch(w, h, x, y, trendView) then
+                        trendView = not trendView
+                        notify()
+                        break
+                    end
+                end
                 if event == "stock_monitor_display"
                     or (event == "monitor_resize" and name == config.monitor)
                     or ((event == "peripheral" or event == "peripheral_detach") and name == config.monitor) then break end

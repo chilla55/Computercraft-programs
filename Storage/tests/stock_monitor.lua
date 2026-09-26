@@ -195,7 +195,7 @@ m.draw(compact,{current=5000,capacity=10000,ratio=0.5,occupied=100,slots=200,
         {name='minecraft:gold_ingot',minute=-5,five=50},
         {name='minecraft:copper_ingot',minute=2,five=20},
     }}},nil,false)
-eq(compactLines[1],'VAULTS / 50.0% FULL')
+eq(compactLines[1],'VAULT STORAGE')
 eq(compactLines[2],'Non-vault: ~1,000')
 eq(compactLines[3],'Vault items: 5,000')
 eq(compactLines[4],'Vault max: 10,000')
@@ -232,3 +232,32 @@ m.drawConsole(errorScreen,nil,nil,{vaults={'a'}},'Up to date','Not enough disk s
 eq(errorLines[7],'HISTORY SAVE ERROR')
 assert(errorLines[8]:find('Not enough disk space',1,true))
 print('Exact history save error appears in the terminal control panel')
+
+for _,dimensions in ipairs({{29,12},{51,19},{26,10}}) do
+    local w,h=dimensions[1],dimensions[2]
+    for _,view in ipairs({false,true}) do
+        local touch,rows=screen(w,h)
+        local reading={current=50,capacity=100,ratio=0.5,occupied=1,slots=2,
+            trend={elapsed=300,minuteElapsed=60,changes={}}}
+        m.draw(touch,reading,nil,view)
+        local text=table.concat(rows,'\n')
+        assert(not text:find('Vault fill:',1,true))
+        assert(not text:find('N:',1,true)); assert(not text:find('Q:',1,true))
+        if not view then
+            local _,percentages=text:gsub('50.0%% full','')
+            eq(percentages,1)
+        end
+        local x,y,label=m.viewButton(w,h,view)
+        eq(rows[h]:sub(x),label)
+        assert(m.isViewTouch(w,h,x,y,view))
+        assert(m.isViewTouch(w,h,x+#label-1,y,view))
+        assert(not m.isViewTouch(w,h,x-1,y,view))
+        assert(not m.isViewTouch(w,h,x+#label,y,view))
+        assert(not m.isViewTouch(w,h,x,y-1,view))
+        m.draw(touch,nil,'Vault offline',view)
+        assert(not table.concat(rows,'\n'):find('Q:',1,true))
+        m.loading(touch,'Starting scan')
+        assert(not table.concat(rows,'\n'):find('Ctrl',1,true))
+    end
+end
+print('Touch footer bounds and monitor without keyboard hints or duplicate percentage passed')

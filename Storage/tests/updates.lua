@@ -197,10 +197,11 @@ print('Updates: verification, rollback, install, launcher, manual checks, and pe
 colors={black=1,white=2,cyan=3,red=4,orange=5,lime=6,lightGray=7}
 local function display()
     local scale=1
-    return {getSize=function() return 51,19 end,
+    local writes={}
+    return {writes=writes,getSize=function() return 51,19 end,
         getTextScale=function() return scale end,setTextScale=function(v) scale=v; os.queueEvent('monitor_resize','display') end,
         setBackgroundColor=function() end,setTextColor=function() end,
-        clear=function() end,setCursorPos=function() end,write=function() end}
+        clear=function() end,setCursorPos=function() end,write=function(text) writes[#writes+1]=text end}
 end
 local terminal=display()
 term={current=function() return terminal end}
@@ -226,7 +227,8 @@ peripheralDevices.a.getItemLimit=function()
     return 64
 end
 local scripted={{'char','u'},{'monitor_resize','display'},{'capacity_ready'},
-    {'char','c'},{'capacity_ready'},{'timer',2},{'char','q'}}
+    {'monitor_touch','other',20,19},{'monitor_touch','display',1,19},
+    {'monitor_touch','display',20,19},{'char','c'},{'capacity_ready'},{'timer',2},{'char','q'}}
 parallel.waitForAny=function(...)
     local threads,filters={},{}
     local function resume(i,...)
@@ -242,6 +244,10 @@ parallel.waitForAny=function(...)
         local event=table.remove(pending,1)
         if not event then
             event=table.remove(scripted,1); assert(event,'Tasks stalled')
+            if event[1]=='monitor_touch' and event[2]=='display' and event[3]==20 then
+                assert(not table.concat(peripheralDevices.display.writes,' '):find('Source:',1,true),
+                    'Wrong monitor or outside-button touch changed the view')
+            end
             if event[1]=='capacity_ready' then
                 eq(manualCount,1) -- U worked before the slow scan completed
             end
@@ -259,6 +265,8 @@ write=function() end
 local services={program=path,requestUpdate=function() manualCount=manualCount+1 end}
 monitor.main({},services)
 eq(manualCount,1); eq(timerCount,3); eq(services.configuring,false)
+assert(table.concat(peripheralDevices.display.writes,' '):find('Source:',1,true),
+    'Touch button did not switch to the changes view')
 eq(capacityReads,2) -- first scan and configuration change, not resize or timer
 assert(decode(files[path..'.cfg']).monitor=='display')
 assert(decode(files[path..'.history']).schema==2)
