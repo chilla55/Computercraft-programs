@@ -8,3 +8,5 @@ The new [distributed transformer system](Powerplant/distributed/README.md) separ
 The previous standalone regulator is backed up on [`backup/standalone-regulator-v18`](https://github.com/chilla55/Computercraft-programs/tree/backup/standalone-regulator-v18), commit `929f894`. Its [setup guide](Powerplant/regulator/SETUP.md) and the existing [plant-wide controller](Powerplant/controller/SETUP.md) remain available for reference and regression tests.
 
 The distributed version has mock integration tests and still needs commissioning in Minecraft. Start with all input/output breakers open and the old regulator stopped; follow the distributed setup guide before enabling it.
+
+The [fighter cockpit](FighterJet/README.md) runs flight control/autopilot on computer 5 and the HUD/radar on computer 6, with a one-command installer and manual verified updates. Live flight requires calibration.

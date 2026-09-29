@@ -1,0 +1,93 @@
+local core=dofile('FighterJet/flight_core.lua')
+local c=dofile('FighterJet/jet_config.lua').flight
+local link=dofile('FighterJet/jet_link.lua')
+local ui=dofile('FighterJet/cockpit_ui.lua')
+local render=dofile('FighterJet/hud_core.lua')
+local config=dofile('FighterJet/jet_config.lua')
+local none=core.input({})
+local function sample(p,b)
+    return {pitch=p or 0,bank=b or 0,altitude=100,position={x=0,y=100,z=0,dimension='minecraft:overworld'},course=0}
+end
+local s=core.new(c)
+core.step(s,sample(10,20),none,0.1,c)
+assert(s.pitch==10 and s.bank==20 and s.throttle==0)
+core.step(s,sample(12,22),core.input({83,68,32}),0.1,c)
+assert(s.pitch>12 and s.bank>22 and s.throttle==1)
+core.step(s,sample(15,25),none,0.1,c)
+assert(s.pitch==15 and s.bank==25 and s.throttle==1,'Release must capture current attitude and latch thrust')
+core.step(s,sample(15,25),core.input({32,340}),0.1,c)
+assert(s.throttle==0,'OFF wins')
+local rev=s.revision
+assert(core.command(s,{action='mode',value='HOLD'},sample(),c))
+core.step(s,sample(),core.input({87,83}),0.1,c)
+assert(s.mode=='MANUAL' and s.revision==rev+2,'Opposing keys still override AP')
+assert(not core.command(s,{action='mode',value='HOME'},sample(),c))
+assert(not core.command(s,{action='home',value={x=0/0,y=1,z=1}},sample(),c))
+assert(core.command(s,{action='home',value={x=200,y=70,z=0}},sample(),c))
+assert(s.home.dimension=='minecraft:overworld')
+assert(core.command(s,{action='altitude',value=130},sample(),c))
+assert(core.command(s,{action='mode',value='HOME'},sample(),c))
+core.step(s,sample(),none,0.1,c)
+assert(s.bank>0 and s.pitch>0,'Home east from north requires right bank; climb to selected altitude')
+for i=1,100 do core.step(s,sample(),none,0.1,c) end
+assert(s.mode=='HOME','Link absence must not change mode')
+local atHome=sample(); atHome.position.x=190
+core.step(s,atHome,none,0.1,c)
+assert(s.mode=='ALT' and s.warning=='HOME REACHED' and s.altitude==130,'Arrival must not land at home Y')
+assert(core.command(s,{action='mode',value='HOME'},sample(),c))
+local lost=sample(); lost.course=nil
+core.step(s,lost,none,0.1,c)
+assert(s.mode=='ALT' and s.warning=='NAV LOST: ALT HOLD')
+lost.altitude=nil; core.step(s,lost,none,0.1,c)
+assert(s.mode=='HOLD' and s.warning=='ALTITUDE LOST')
+assert(core.course({x=0,z=0},{x=-10,z=0},1,2)==-90)
+assert(core.course({x=0,z=0},{x=0.1,z=0},1,2)==nil)
+assert(core.course({x=0,z=0,dimension='a'},{x=10,z=0,dimension='b'},1,2)==nil)
+-- Both axes at once retain the command ratio under saturation.
+s=core.new(c); s.pitch=50; s.bank=40
+local demand=core.step(s,sample(),none,0.1,c)
+assert(math.abs(demand.left)<=10 and math.abs(demand.right)<=10 and demand.left~=demand.right)
+-- Simple plant sanity check: disturbances must decay with calibrated positive signs.
+s=core.new(c); s.pitch=0; s.bank=0
+local p,b=10,-10
+for i=1,150 do
+    local d=core.step(s,sample(p,b),none,0.1,c)
+    p=p+(d.left+d.right)*0.05; b=b+(d.left-d.right)*0.05
+end
+assert(math.abs(p)<2 and math.abs(b)<2,'Feedback should reduce error')
+-- Session/ticket/revision/sequence reject stale AP commands.
+local server=link.server('boot1'); local ticket=link.ticket(server,10)
+local m={boot='boot1',revision=3,ticket=ticket,sequence=1}
+assert(link.accept(server,m,3,10.5,2))
+assert(not link.accept(server,m,3,10.5,2))
+m.sequence=2
+assert(not link.accept(server,m,4,10.5,2),'Pilot revision invalidates old AP command')
+assert(not link.accept(server,m,3,13,2),'Expired request')
+m.boot='boot0'; assert(not link.accept(server,m,3,10.5,2),'Previous boot')
+local recovery={autoRestartHUD=true,grace=30,timeout=10,cooldown=60,maxAttempts=3}
+local w={started=0,attempts=0}
+assert(not link.recovery(w,29,nil,recovery))
+assert(link.recovery(w,30,nil,recovery))
+assert(not link.recovery(w,40,nil,recovery))
+assert(link.recovery(w,90,nil,recovery)); assert(link.recovery(w,150,nil,recovery))
+assert(not link.recovery(w,1000,nil,recovery),'Must stop reboot loop')
+-- UI cannot reboot from one accidental touch; no reboot action outside system page.
+local model=ui.new(config); model.page=6
+assert(not ui.touch(model,2,5,15,10,0))
+assert(ui.touch(model,2,5,15,10,1).localAction=='rebootFlight')
+assert(not ui.touch(model,2,5,15,10,10))
+assert(not ui.touch(model,2,5,15,10,15),'Confirmation must expire')
+for page=1,#ui.pages do
+    model.page=page
+    for _,calibrated in ipairs({false,true}) do
+        config.flight.calibrated=calibrated
+        for _,fresh in ipairs({false,true}) do
+            local rows=ui.render(model,render,core,config,15,10,{data={gimbal={0,0}}},true,nil,false,
+                {healthy=true,live=false,mode='MANUAL'},fresh,0)
+            assert(#rows==10)
+            for _,r in ipairs(rows) do assert(#r[1]==15 and #r[2]==15 and #r[3]==15) end
+            if not fresh then assert(rows[1][1]=='FLIGHT LINK LOS','Lost link must be visible on every page') end
+        end
+    end
+end
+print('Flight control, navigation, protocol, watchdog and cockpit tests passed')
