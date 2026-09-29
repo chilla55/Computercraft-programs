@@ -25,6 +25,30 @@ function M.input(codes)
         on=held[32] or false, off=held[340] or false,
         any=held[87] or held[83] or held[65] or held[68] or held[32] or held[340] or false}
 end
+-- Direct commissioning demand: mechanical directions, no attitude feedback.
+function M.direct(input, degrees, throttle)
+    if input.off then throttle=0 elseif input.on then throttle=1 end
+    local left=(input.pitch+input.bank)*degrees
+    local right=(input.pitch-input.bank)*degrees
+    local scale=math.max(1,math.abs(left)/degrees,math.abs(right)/degrees)
+    local function rounded(v) return math.floor(math.abs(v)/scale+0.5)*(v<0 and -1 or 1) end
+    return {left=rounded(left),right=rounded(right),throttle=throttle}
+end
+-- A pulse requires a new Space press; holding it cannot restart an expired pulse.
+function M.pulse(s,input,now,count)
+    if not input.on then s.latched=false end
+    if input.off or not input.on then s.untilTime=nil end
+    if not input.on and input.pitch~=0 and not s.selectHeld then
+        s.selected=((s.selected or 1)-1+input.pitch)%count+1
+    end
+    s.selectHeld=input.pitch~=0
+    s.selected=s.selected or 1
+    if input.on and not input.off and not s.latched then
+        s.untilTime=now+0.3; s.latched=true
+    end
+    if input.off then s.latched=true end
+    return s.untilTime and now<s.untilTime and 1 or 0
+end
 function M.new(c, saved)
     saved = saved or {}
     return {mode='MANUAL', throttle=0, revision=0, pitch=nil, bank=nil,

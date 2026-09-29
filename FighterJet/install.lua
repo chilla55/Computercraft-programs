@@ -115,7 +115,7 @@ function M.launcher(root,update)
         (update and [[local action=... or 'check'
 assert(action=='check' or action=='apply' or action=='rollback','Usage: fighter/update [check|apply|rollback]')
 shell.run(fs.combine(root,'releases/'..selected.version..'/install.lua'),action,root)
-]] or [[shell.run(fs.combine(root,'releases/'..selected.version..'/startup.lua'))
+]] or [[shell.run(fs.combine(root,'releases/'..selected.version..'/startup.lua'),...)
 ]])
 end
 local function populate(root,release)
@@ -149,6 +149,7 @@ function M.run(action,root,get)
     if fs.exists(root) then assert(fs.exists(marker),'Unmanaged installation directory; choose another directory') end
     local current=M.current(root)
     if action=='install' and current then
+        write(fs.combine(root,'run.lua'),M.launcher(root,false))
         installStartup(root)
         print('Already installed: '..current.version..'. Use '..root..'/update check or apply.'); return
     end
@@ -198,7 +199,7 @@ function M.run(action,root,get)
     end
     write(fs.combine(release,'.complete'),manifest.version..'\n')
     populate(root,release)
-    if not fs.exists(fs.combine(root,'run.lua')) then write(fs.combine(root,'run.lua'),M.launcher(root,false)) end
+    write(fs.combine(root,'run.lua'),M.launcher(root,false))
     if not fs.exists(fs.combine(root,'update.lua')) then write(fs.combine(root,'update.lua'),M.launcher(root,true)) end
     activate(root,manifest.version,current and current.version or nil)
     if action=='install' then installStartup(root) end

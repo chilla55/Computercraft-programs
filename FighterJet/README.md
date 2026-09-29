@@ -95,6 +95,86 @@ before relying on attitude hold or autopilot. Gains are starting values.
 The gimbal supplies two tilt angles, not yaw or a full attitude quaternion;
 sustained inverted/aerobatic flight is not validated.
 
+## Commissioning when the computer is the only control
+
+Release `fighter-0.1.1` adds explicit test modes that work with both verification
+flags still false. They write actuators, but **never run attitude stabilization
+or autopilot**. Calibration flags are not changed automatically.
+
+For the first upgrade from 0.1.0, stop both programs while parked and use this
+manual command on both computers. It updates the launcher to accept test modes
+as well as installing the new release:
+
+```
+wget run https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/FighterJet/install.lua apply
+```
+
+If you already used `/fighter/update apply`, rerun the regular installer command
+without `apply` once to refresh the launcher. Subsequent updates use the normal
+manual update utility. Saved home, configuration, and startup mode remain intact.
+
+Start the HUD on computer 6 with `/fighter/run`. On computer 5, choose a test:
+
+### Individual thruster test
+
+```
+/fighter/run thruster
+```
+
+Release all flight keys initially. Use **S** to select the next thruster and
+**W** the previous one; selection happens once per press. The horizon page
+shows the selected name. **Space** starts a nominal 0.3-second full-thrust pulse
+on that thruster only. Releasing Space ends it early; holding Space does not
+repeat it. **Shift** cancels it and requires Space release before another pulse.
+Actual stop timing includes server/peripheral latency. Wings stay neutral.
+Observe whether each thruster pushes forward, backward, upward, etc. This test
+is for identifying hardware, not flying the aircraft. Ctrl+T on 5 ends it.
+
+### Direct flight/surface test
+
+After identifying the thrusters, stop the individual test and run on 5:
+
+```
+/fighter/run commission 5
+```
+
+`5` is the maximum surface deflection in degrees (1..10 accepted). The default
+is 5. Typewriter control uses the established *mechanical* wing directions:
+
+| Key | Direct command |
+| --- | --- |
+| S | Both trailing edges UP |
+| W | Both trailing edges DOWN |
+| D | Left trailing edge UP, right DOWN |
+| A | Left trailing edge DOWN, right UP |
+| Space | Latch all four thrusters at full thrust |
+| Left Shift | Latch thrust off |
+| Release W/S/A/D | Surfaces return to neutral; no attitude hold |
+
+Pitch/roll inputs can be combined; the mixture is scaled to the selected
+maximum angle. These are mechanical commands, **not yet verified nose/bank
+directions**. Keep initial test inputs brief. Once the aircraft has flying
+speed, observe the actual nose/bank response to S and D separately and compare
+with the raw GX/GZ readings on the HUD. For example, report “S raised the nose,
+GZ increased” or “D lowered the left wing, GX decreased.” That establishes the
+sensor axis/sign and the corresponding aerodynamic correction sign. Reverse
+commands remain available throughout; there is no computer-imposed attitude
+correction during this mode. Never enable live stabilization merely to make
+these tests available.
+
+The controller writes `/fighter/commission.csv`, overwriting the previous test
+trace. It records raw gimbal angles, pilot common/differential input, commanded
+surface angles, applied thrust, selected thruster, altitude and position at up
+to 4 Hz, capped at 128 KiB. A full disk stops recording without stopping direct
+control. The trace alone cannot identify which end is the nose: your visual
+observation supplies that reference. Resting trim is not automatically treated
+as a physically level attitude.
+
+The HUD shows DIRECT TEST or THRUSTER TEST with **NO ATTITUDE HOLD**. Autopilot
+requests are rejected, HUD auto-reboot is disabled during tests, and Ctrl+T
+releases outputs. Tests do not become a saved startup mode. After testing,
+normal `/fighter/run` again uses your preserved preview/live startup selection.
+
 ## Pilot controls
 
 | Input | Action |

@@ -1,22 +1,33 @@
 -- Computer 5: flight and autopilot owner. Usage: flight [preview|live]
 local args={...}
-assert(#args<=1 and (not args[1] or args[1]=='preview' or args[1]=='live'),'Usage: flight [preview|live]')
-local live=args[1]=='live'
+local mode=args[1] or 'preview'
+assert(#args<=2 and (mode=='preview' or mode=='live' or mode=='commission' or mode=='thruster'),
+    'Usage: flight [preview|live|commission [degrees]|thruster]')
+assert(not args[2] or mode=='commission','Only commission accepts a surface angle')
+local commissioning=mode=='commission' or mode=='thruster'
+local live=mode~='preview'
+local degrees=tonumber(args[2] or '5')
+assert(degrees and degrees%1==0 and degrees>=1 and degrees<=10,'Commission angle must be 1..10 degrees')
 local dir=fs.getDir(shell.getRunningProgram())
 local paths=assert(loadfile(fs.combine(dir,'jet_paths.lua')))()
 local function module(n) return paths.module(dir,n) end
 local c,core,link,store,hw=module('jet_config'),module('flight_core'),module('jet_link'),module('jet_store'),module('hardware')
 assert(os.getComputerID()==c.flightID,'Run flight on computer '..c.flightID)
-assert(not live or (c.flight.calibrated and c.flight.thrustersVerified),
+assert(mode~='live' or (c.flight.calibrated and c.flight.thrustersVerified),
     'Live blocked: verify gimbal/control signs and thrust directions in jet_config.lua first')
+if not commissioning then
 assert(c.flight.pitchAxis~=c.flight.bankAxis and (c.flight.pitchAxis==1 or c.flight.pitchAxis==2)
     and (c.flight.bankAxis==1 or c.flight.bankAxis==2),'Invalid gimbal axes')
 for _,key in ipairs({'pitchSign','bankSign','pitchSurfaceSign','bankSurfaceSign'}) do
     assert(math.abs(c.flight[key])==1,'Invalid '..key)
 end
+end
 assert(c.flight.maxSurface>=1 and c.flight.maxSurface<=40 and c.flight.maxSurface%1==0,'Invalid surface limit')
 local statePath=fs.combine(paths.root(dir),'jet_state')
 local state=core.new(c.flight,store.load(statePath))
+if commissioning then state.mode=mode=='thruster' and 'THRUSTER TEST' or 'DIRECT TEST' end
+local pulse={selected=1}
+local report,reportBytes,reportAt=nil,0,0
 local boot=tostring(os.epoch('utc'))..':'..tostring(math.random(1,2147483647))
 local server=link.server(boot)
 local desired={left=0,right=0,throttle=0}
@@ -90,16 +101,18 @@ local function limits(wing)
     end
 end
 local function thrust()
-    local applied=nil
+    local applied,appliedIndex=nil,nil
     while true do
         local target=healthyOutput() and desired.throttle or 0
-        if applied~=target then
+        if mode=='thruster' and (not pulse.untilTime or os.clock()>=pulse.untilTime) then target=0 end
+        if applied~=target or (mode=='thruster' and appliedIndex~=pulse.selected) then
             local jobs={}
-            for _,name in ipairs(c.thrusters) do
+            for index,name in ipairs(c.thrusters) do
                 local n=name
-                jobs[#jobs+1]=function() call(n,'setThrottle',target); call(n,'setEnabled',true) end
+                local throttle=(mode~='thruster' or index==pulse.selected) and target or 0
+                jobs[#jobs+1]=function() call(n,'setThrottle',throttle); call(n,'setEnabled',true) end
             end
-            parallel.waitForAll(table.unpack(jobs)); applied=target
+            parallel.waitForAll(table.unpack(jobs)); applied=target; appliedIndex=pulse.selected
         end
         state.appliedThrottle=applied
         state.thrustProgress=os.clock()
@@ -126,7 +139,9 @@ local function control()
         end
         parallel.waitForAll(table.unpack(jobs))
         local now=os.clock()
-        local pitch,bank=core.attitude(raw,c.flight)
+        assert(type(raw)=='table' and core.finite(raw[1]) and core.finite(raw[2]),'Invalid raw gimbal angles')
+        local pitch,bank=0,0
+        if not commissioning then pitch,bank=core.attitude(raw,c.flight) end
         local input=core.input(keys)
         local dt=previousTime and now-previousTime or c.flight.period
         if nav.position and nav.at and nav.at~=(courseTime or -1) then
@@ -137,7 +152,7 @@ local function control()
         if courseAt and now-courseAt>c.flight.courseMaxAge then course=nil end
         local vertical=core.finite(altitude) and previousAltitude and dt>0 and (altitude-previousAltitude)/dt or 0
         sample={pitch=pitch,bank=bank,altitude=altitude,verticalSpeed=vertical,position=nav.position,
-            marker=nav.marker,course=course}
+            marker=nav.marker,course=course,raw=raw}
         if not ready then
             state.pitch=pitch; state.bank=bank
             if not input.any then ready=true end
@@ -145,6 +160,7 @@ local function control()
         if pending then
             local request=pending; pending=nil
             local accepted,reason=link.accept(server,request,state.revision,now,c.requestMaxAge)
+            if commissioning then accepted=false; reason='Commissioning: autopilot/config requests disabled' end
             if accepted and (input.any or not ready) then accepted=false; reason='Pilot input active' end
             if accepted then
                 local oldHome,oldAlt,oldRevision=state.home,state.altitude,state.revision
@@ -159,7 +175,27 @@ local function control()
             end
             ack={sequence=request.sequence,ok=accepted,message=reason}
         end
-        if ready then desired=core.step(state,sample,input,dt,c.flight) end
+        if ready then
+            if mode=='commission' then desired=core.direct(input,degrees,state.throttle); state.throttle=desired.throttle
+            elseif mode=='thruster' then
+                desired={left=0,right=0,throttle=core.pulse(pulse,input,now,#c.thrusters)}
+                state.throttle=desired.throttle
+            else desired=core.step(state,sample,input,dt,c.flight) end
+        end
+        if commissioning and report and now-reportAt>=0.25 then
+            local p=sample.position or {}
+            local line=table.concat({string.format('%.2f',now-started),raw[1],raw[2],input.pitch,input.bank,
+                desired.left,desired.right,state.appliedThrottle or 0,mode=='thruster' and pulse.selected or 0,
+                tostring(altitude),tostring(p.x),tostring(p.y),tostring(p.z)},',')
+            local logged,err=pcall(function()
+                assert(reportBytes+#line+1<=131072,'Trace reached 128 KiB')
+                report.writeLine(line); report.flush(); reportBytes=reportBytes+#line+1; reportAt=now
+            end)
+            if not logged then
+                pcall(report.close); report=nil; state.warning='TRACE STOPPED: '..tostring(err)
+                if err=='Terminated' then error(err,0) end
+            end
+        end
         previousTime=now; previousAltitude=core.finite(altitude) and altitude or nil
         lastCycle=os.clock(); cycles=cycles+1
         if live and now-started>c.flight.outputTimeout*2 then
@@ -175,6 +211,16 @@ end
 local function flightTask()
     local ok,err=pcall(function()
         if live then
+            if commissioning then
+                local ok,file=pcall(fs.open,fs.combine(paths.root(dir),'commission.csv'),'w')
+                if ok and file then
+                    local written=pcall(function()
+                        file.writeLine('seconds,gx,gz,commonKey,differentialKey,leftSurface,rightSurface,throttle,thrusterIndex,altitude,x,y,z')
+                        file.flush()
+                    end)
+                    if written then report=file; reportBytes=128 else pcall(file.close); state.warning='TRACE UNAVAILABLE' end
+                else state.warning='TRACE UNAVAILABLE' end
+            end
             local failures=stopOutputs(); assert(#failures==0,table.concat(failures,'; '))
             parallel.waitForAny(control,function() refresh(wings[1]) end,function() refresh(wings[2]) end,
                 function() limits(wings[1]) end,function() limits(wings[2]) end,thrust)
@@ -208,14 +254,15 @@ local function statusSender()
             targetPitch=state.pitch,targetBank=state.bank,altitude=state.altitude,home=state.home,
             distance=state.distance,course=sample and sample.course,throttle=state.throttle,
             surfaces=desired,warning=state.warning,ack=ack,restarts=watchdog.attempts,
-            calibrated=c.flight.calibrated}
+            calibrated=c.flight.calibrated,commission=commissioning and {kind=mode,degrees=degrees,
+                thruster=c.thrusters[pulse.selected],throttle=state.appliedThrottle or 0,raw=sample and sample.raw} or nil}
         pcall(rednet.send,c.hudID,m,link.protocol)
         sleep(0.5)
     end
 end
 local function recovery()
     while true do
-        if live and link.recovery(watchdog,os.clock(),lastHUD,c.recovery) then
+        if mode=='live' and link.recovery(watchdog,os.clock(),lastHUD,c.recovery) then
             local ok,err=pcall(function()
                 assert(call(c.hudPeer,'getID')==c.hudID,'HUD peer ID mismatch')
                 call(c.hudPeer,'reboot')
@@ -228,19 +275,25 @@ end
 local function screen()
     while true do
         term.setCursorPos(1,1); term.clear()
-        print('FIGHTER '..(live and 'LIVE' or 'PREVIEW - NO ACTUATOR WRITES'))
+        print('FIGHTER '..(commissioning and state.mode or (live and 'LIVE' or 'PREVIEW - NO ACTUATOR WRITES')))
         print(fault and ('FAULT: '..fault) or (ready and state.mode or 'Release flight keys first'))
-        if sample then print(string.format('Pitch %.1f Bank %.1f',sample.pitch,sample.bank)) end
+        if sample then
+            if commissioning then print(string.format('RAW GX %.2f GZ %.2f',sample.raw[1],sample.raw[2]))
+            else print(string.format('Pitch %.1f Bank %.1f',sample.pitch,sample.bank)) end
+        end
         print(string.format('Surfaces L %d R %d Thrust %d',desired.left,desired.right,desired.throttle))
-        print('W/S pitch A/D bank Space ON Shift OFF')
+        if mode=='thruster' then print('W/S select: '..c.thrusters[pulse.selected]); print('Space: 0.3s pulse, release to rearm; Shift OFF')
+        elseif mode=='commission' then print('W/S common A/D differential; NO STABILIZATION'); print('Space FULL THRUST; Shift OFF; release wings = neutral')
+        else print('W/S pitch A/D bank Space ON Shift OFF') end
         print('HUD '..(lastHUD and os.clock()-lastHUD<c.linkTimeout and 'CONNECTED' or 'OFFLINE'))
         print('Ctrl+T stops this controller')
         sleep(1)
     end
 end
-print('Starting fighter '..(live and 'LIVE' or 'PREVIEW'))
+print('Starting fighter '..mode)
 local ok,err=pcall(function() parallel.waitForAny(flightTask,network,statusSender,recovery,screen) end)
 local failures=stopOutputs()
+if report then pcall(report.close) end
 if #failures>0 then print('Cleanup failed: '..table.concat(failures,'; ')) end
 -- Restore original spring limits after neutral, if termination allows it.
 if live then

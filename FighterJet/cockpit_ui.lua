@@ -56,7 +56,20 @@ function M.render(ui,core,flightCore,c,w,h,packet,sensorsFresh,radar,radarFresh,
     elseif page=='horizon' then
         local valid,pitch,bank=false,nil,nil
         if d.gimbal then valid,pitch,bank=pcall(flightCore.attitude,d.gimbal,c.flight) end
-        if valid and c.flight.calibrated then
+        if linkFresh and status.commission then
+            local test=status.commission
+            f.text(1,2,test.kind=='thruster' and test.thruster or ('DIRECT '..test.degrees..' DEG'),'4')
+            f.text(1,3,'NO ATTITUDE HOLD','4')
+            f.text(1,4,'GX '..core.number(d.gimbal and d.gimbal[1],2))
+            f.text(1,5,'GZ '..core.number(d.gimbal and d.gimbal[2],2))
+            if test.kind=='thruster' then
+                f.text(1,6,'W/S SELECT','b'); f.text(1,7,'SPACE PULSE','b')
+            else
+                f.text(1,6,'L '..core.number(status.surfaces and status.surfaces.left)..' R '..core.number(status.surfaces and status.surfaces.right))
+                f.text(1,7,'W/S BOTH A/D MIX','b')
+            end
+            f.text(1,8,'THRUST '..core.number(test.throttle*100)..'%')
+        elseif valid and c.flight.calibrated then
             local cx,cy=(w+1)/2,(h+2)/2
             local angle=math.rad(bank)
             for y=3,h-2 do

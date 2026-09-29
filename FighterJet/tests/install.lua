@@ -117,8 +117,8 @@ data[pointer]='partial JSON'
 assert(installer.current('/fighter').version=='fighter-0.2.0')
 local launched
 shell={run=function(...) launched={...} end}
-assert(load(data['/fighter/run.lua']))()
-assert(launched[1]=='/fighter/releases/fighter-0.2.0/startup.lua')
+assert(load(data['/fighter/run.lua']))('thruster')
+assert(launched[1]=='/fighter/releases/fighter-0.2.0/startup.lua' and launched[2]=='thruster')
 assert(load(data['/fighter/update.lua']))('check')
 assert(launched[1]=='/fighter/releases/fighter-0.2.0/install.lua' and launched[2]=='check')
 freeSpace=100

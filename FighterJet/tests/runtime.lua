@@ -4,10 +4,12 @@ local function run(mode)
     local clock,latest,commandSent,reboots,writes=0,nil,false,{},{}
     local terminated=false
     local config=dofile('FighterJet/jet_config.lua')
-    config.flight.calibrated=true; config.flight.thrustersVerified=true
+    local commissioning=mode=='commission' or mode=='thruster'
+    config.flight.calibrated=not commissioning; config.flight.thrustersVerified=not commissioning
     config.recovery.grace=1; config.recovery.timeout=1; config.recovery.cooldown=1; config.recovery.maxAttempts=2
     local limits={torsion_spring_0=40,torsion_spring_1=40}
     local commands={directional_gearshift_2=0,directional_gearshift_3=0}
+    local starts={}
     local throttle={thruster_8=0,thruster_9=0,thruster_10=0,thruster_11=0}
     local fakeFiles={}; local stateSnapshots={}; local errors={}
     local function pause(d)
@@ -25,7 +27,7 @@ local function run(mode)
         exists=function(p) return fakeFiles[p]~=nil end,
         open=function(p,m)
             local raw=fakeFiles[p] or ''
-            return {write=function(s) raw=raw..s end,readAll=function() return raw end,
+            return {write=function(s) raw=raw..s end,writeLine=function(s) raw=raw..s..'\n' end,flush=function() end,readAll=function() return raw end,
                 close=function() if m=='w' then fakeFiles[p]=raw end end}
         end}
     _G.textutils={serialize=function(v) stateSnapshots[#stateSnapshots+1]=v; return tostring(#stateSnapshots) end,
@@ -53,6 +55,12 @@ local function run(mode)
             return {0,0}
         end
         if method=='getPressedKeyCodes' then
+            if mode=='thruster' then
+                if (clock>0.5 and clock<2) or (clock>3 and clock<3.5) then return {32} end
+                if clock>=2.1 and clock<2.5 then return {83} end
+                return {}
+            end
+            if mode=='commission' and clock>2 and clock<2.5 then return {83,68} end
             if (mode=='override' or mode=='setter_failure') and clock>2 and clock<2.5 then return {68} end
             if clock>0.5 and clock<0.8 then return {32} end
             return {}
@@ -74,7 +82,9 @@ local function run(mode)
             commands[name]=a and -1 or b and 1 or 0
             if mode=='setter_failure' and clock>2 and (a or b) then error('gear failed after write') end
             pause(0.05)
-        elseif method=='setThrottle' then throttle[name]=a
+        elseif method=='setThrottle' then
+            if a==1 and throttle[name]~=1 then starts[#starts+1]={name=name,at=clock} end
+            throttle[name]=a
         elseif method~='setEnabled' then error('Unexpected method '..method) end
     end}
     local acceptedMode=false
@@ -98,22 +108,34 @@ local function run(mode)
         if path=='FighterJet/jet_config.lua' then return function() return config end end
         return realLoad(path,...)
     end
-    local ok,err=pcall(realLoad('FighterJet/flight.lua'),mode=='preview' and 'preview' or 'live')
+    local ok,err=pcall(realLoad('FighterJet/flight.lua'),commissioning and mode or (mode=='preview' and 'preview' or 'live'))
     _G.loadfile=realLoad
     assert(ok,tostring(err))
-    assert(commandSent and acceptedMode,'Runtime must process a fresh mode request')
+    assert(commandSent)
+    if commissioning then assert(not acceptedMode and latest.ack and not latest.ack.ok,'Commissioning accepted autopilot')
+    else assert(acceptedMode,'Runtime must process a fresh mode request') end
     if mode=='preview' then assert(#writes==0 and #reboots==0,'Preview wrote hardware')
     else
-        assert(#reboots==2,'Bounded HUD recovery did not run twice')
+        assert(#reboots==(commissioning and 0 or 2),'Incorrect HUD recovery in test mode')
         for _,name in ipairs(reboots) do assert(name=='left','Never automatically reboot FC5') end
         for _,value in pairs(throttle) do assert(value==0,'Cleanup left thrust on') end
         for _,value in pairs(commands) do assert(value==0,'Cleanup left gear powered') end
     end
-    if mode=='sensor_failure' then assert(latest.fault and latest.fault:find('gimbal detached',1,true))
+    if mode=='thruster' then
+        assert(latest.mode=='THRUSTER TEST' and #starts==2,'Holding Space repeated the pulse')
+        assert(starts[1].name=='thruster_8' and starts[2].name=='thruster_9','Wrong selected thruster')
+        for _,w in ipairs(writes) do if w[2]=='setOutputs' then assert(not w[3] and not w[4],'Thruster test moved wings') end end
+    elseif mode=='commission' then
+        assert(latest.mode=='DIRECT TEST' and #starts==4)
+        local moved=false
+        for _,w in ipairs(writes) do if w[2]=='setLimit' and w[3]==5 then moved=true end end
+        assert(moved,'Direct pilot inputs did not move surfaces')
+        assert(fakeFiles['FighterJet/commission.csv']:find('seconds,gx,gz',1,true))
+    elseif mode=='sensor_failure' then assert(latest.fault and latest.fault:find('gimbal detached',1,true))
     elseif mode=='setter_failure' then assert(latest.fault and latest.fault:find('gear failed after write',1,true))
     elseif mode=='override' then assert(latest.mode=='MANUAL','Pilot did not override AP')
     else assert(latest.mode=='HOLD','HUD failure changed flight mode') end
 end
-for _,mode in ipairs({'preview','live','override','sensor_failure','setter_failure'}) do run(mode) end
+for _,mode in ipairs({'preview','live','override','sensor_failure','setter_failure','commission','thruster'}) do run(mode) end
 print,os.clock,os.epoch,os.getComputerID=realPrint,realClock,realEpoch,realID
-print('Actual flight runtime: preview, live, pilot override, sensor fault, cleanup and HUD reboot tests passed')
+print('Actual flight runtime: preview, live, pilot override, sensor/actuator faults, cleanup, HUD reboot and commissioning tests passed')

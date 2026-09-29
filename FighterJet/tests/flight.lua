@@ -8,6 +8,23 @@ local none=core.input({})
 local function sample(p,b)
     return {pitch=p or 0,bank=b or 0,altitude=100,position={x=0,y=100,z=0,dimension='minecraft:overworld'},course=0}
 end
+-- Commissioning must be usable with both verification flags false.
+local direct=core.direct(core.input({83,68,32}),5,0)
+assert(direct.left==5 and direct.right==0 and direct.throttle==1)
+local neutral=core.direct(core.input({}),5,direct.throttle)
+assert(neutral.left==0 and neutral.right==0 and neutral.throttle==1)
+assert(core.direct(core.input({340}),5,1).throttle==0)
+local pulse={selected=1}
+assert(core.pulse(pulse,core.input({32}),0,4)==1)
+assert(core.pulse(pulse,core.input({32}),0.31,4)==0)
+assert(core.pulse(pulse,core.input({32}),2,4)==0)
+core.pulse(pulse,core.input({83}),3,4)
+assert(pulse.selected==2)
+core.pulse(pulse,core.input({83}),4,4)
+assert(pulse.selected==2,'Holding selection must not scroll continually')
+assert(core.pulse(pulse,core.input({32}),5,4)==1)
+assert(core.pulse(pulse,core.input({32,340}),5.1,4)==0)
+assert(core.pulse(pulse,core.input({32}),5.2,4)==0,'Shift must require Space release before firing again')
 local s=core.new(c)
 core.step(s,sample(10,20),none,0.1,c)
 assert(s.pitch==10 and s.bank==20 and s.throttle==0)
