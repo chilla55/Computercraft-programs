@@ -6,12 +6,15 @@ assert(#args<=2 and (mode=='preview' or mode=='live' or mode=='commission' or mo
 assert(not args[2] or mode=='commission','Only commission accepts a surface angle')
 local commissioning=mode=='commission' or mode=='thruster'
 local live=mode~='preview'
-local degrees=tonumber(args[2] or '5')
-assert(degrees and degrees%1==0 and degrees>=1 and degrees<=10,'Commission angle must be 1..10 degrees')
+local degrees=tonumber(args[2] or '20')
+assert(degrees and degrees%1==0 and degrees>=0 and degrees<=40,'Commission angle must be 0..40 degrees (0 = thrust assist only)')
 local dir=fs.getDir(shell.getRunningProgram())
 local paths=assert(loadfile(fs.combine(dir,'jet_paths.lua')))()
 local function module(n) return paths.module(dir,n) end
 local c,core,link,store,hw=module('jet_config'),module('flight_core'),module('jet_link'),module('jet_store'),module('hardware')
+local vectoring=core.vectorConfig(c.vectoring)
+-- Validate the mapping before touching hardware. Individual thruster tests bypass the mixer.
+if mode~='thruster' then core.thrustMix(c.thrusters,1,0,0,vectoring) end
 assert(os.getComputerID()==c.flightID,'Run flight on computer '..c.flightID)
 assert(mode~='live' or (c.flight.calibrated and c.flight.thrustersVerified),
     'Live blocked: verify gimbal/control signs and thrust directions in jet_config.lua first')
@@ -101,20 +104,28 @@ local function limits(wing)
     end
 end
 local function thrust()
-    local applied,appliedIndex=nil,nil
+    local applied={}
     while true do
-        local target=healthyOutput() and desired.throttle or 0
-        if mode=='thruster' and (not pulse.untilTime or os.clock()>=pulse.untilTime) then target=0 end
-        if applied~=target or (mode=='thruster' and appliedIndex~=pulse.selected) then
-            local jobs={}
-            for index,name in ipairs(c.thrusters) do
-                local n=name
-                local throttle=(mode~='thruster' or index==pulse.selected) and target or 0
-                jobs[#jobs+1]=function() call(n,'setThrottle',throttle); call(n,'setEnabled',true) end
-            end
-            parallel.waitForAll(table.unpack(jobs)); applied=target; appliedIndex=pulse.selected
+        local base=healthyOutput() and desired.throttle or 0
+        local target
+        if mode=='thruster' then
+            if not pulse.untilTime or os.clock()>=pulse.untilTime then base=0 end
+            target={}
+            for index,name in ipairs(c.thrusters) do target[name]=index==pulse.selected and base or 0 end
+        else
+            target=core.thrustMix(c.thrusters,base,desired.pitchAssist or 0,desired.yawAssist or 0,vectoring)
         end
-        state.appliedThrottle=applied
+        local jobs={}
+        for _,name in ipairs(c.thrusters) do
+            local n,value=name,target[name]
+            if applied[n]~=value then
+                jobs[#jobs+1]=function() call(n,'setThrottle',value); call(n,'setEnabled',true) end
+            end
+        end
+        if #jobs>0 then parallel.waitForAll(table.unpack(jobs)) end
+        applied=target; state.appliedThrottles=target
+        local sum=0; for _,value in pairs(target) do sum=sum+value end
+        state.appliedThrottle=mode=='thruster' and base or sum/#c.thrusters
         state.thrustProgress=os.clock()
         sleep(0.05)
     end
@@ -187,6 +198,7 @@ local function control()
             local line=table.concat({string.format('%.2f',now-started),raw[1],raw[2],input.pitch,input.bank,
                 desired.left,desired.right,state.appliedThrottle or 0,mode=='thruster' and pulse.selected or 0,
                 tostring(altitude),tostring(p.x),tostring(p.y),tostring(p.z)},',')
+            for _,name in ipairs(c.thrusters) do line=line..','..tostring(state.appliedThrottles and state.appliedThrottles[name] or 0) end
             local logged,err=pcall(function()
                 assert(reportBytes+#line+1<=131072,'Trace reached 128 KiB')
                 report.writeLine(line); report.flush(); reportBytes=reportBytes+#line+1; reportAt=now
@@ -215,7 +227,7 @@ local function flightTask()
                 local ok,file=pcall(fs.open,fs.combine(paths.root(dir),'commission.csv'),'w')
                 if ok and file then
                     local written=pcall(function()
-                        file.writeLine('seconds,gx,gz,commonKey,differentialKey,leftSurface,rightSurface,throttle,thrusterIndex,altitude,x,y,z')
+                        file.writeLine('seconds,gx,gz,commonKey,differentialKey,leftSurface,rightSurface,throttle,thrusterIndex,altitude,x,y,z,'..table.concat(c.thrusters,','))
                         file.flush()
                     end)
                     if written then report=file; reportBytes=128 else pcall(file.close); state.warning='TRACE UNAVAILABLE' end
@@ -254,7 +266,8 @@ local function statusSender()
             targetPitch=state.pitch,targetBank=state.bank,altitude=state.altitude,home=state.home,
             distance=state.distance,course=sample and sample.course,throttle=state.throttle,
             surfaces=desired,warning=state.warning,ack=ack,restarts=watchdog.attempts,
-            calibrated=c.flight.calibrated,commission=commissioning and {kind=mode,degrees=degrees,
+            calibrated=c.flight.calibrated,engineOutputs=state.appliedThrottles,
+            vectoring=mode~='thruster' and {enabled=vectoring.enabled,authority=vectoring.authority} or nil,commission=commissioning and {kind=mode,degrees=degrees,
                 thruster=c.thrusters[pulse.selected],throttle=state.appliedThrottle or 0,raw=sample and sample.raw} or nil}
         pcall(rednet.send,c.hudID,m,link.protocol)
         sleep(0.5)
@@ -283,7 +296,7 @@ local function screen()
         end
         print(string.format('Surfaces L %d R %d Thrust %d',desired.left,desired.right,desired.throttle))
         if mode=='thruster' then print('W/S select: '..c.thrusters[pulse.selected]); print('Space: 0.3s pulse, release to rearm; Shift OFF')
-        elseif mode=='commission' then print('W/S common A/D differential; NO STABILIZATION'); print('Space FULL THRUST; Shift OFF; release wings = neutral')
+        elseif mode=='commission' then print('W/S common A/D differential; NO STABILIZATION'); print('Thrust assist '..(vectoring.enabled and (vectoring.authority*100)..'%' or 'OFF')); print('Space FULL THRUST; Shift OFF; release wings = neutral')
         else print('W/S pitch A/D bank Space ON Shift OFF') end
         print('HUD '..(lastHUD and os.clock()-lastHUD<c.linkTimeout and 'CONNECTED' or 'OFFLINE'))
         print('Ctrl+T stops this controller')

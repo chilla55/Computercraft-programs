@@ -28,11 +28,47 @@ end
 -- Direct commissioning demand: mechanical directions, no attitude feedback.
 function M.direct(input, degrees, throttle)
     if input.off then throttle=0 elseif input.on then throttle=1 end
-    local left=(input.pitch+input.bank)*degrees
-    local right=(input.pitch-input.bank)*degrees
-    local scale=math.max(1,math.abs(left)/degrees,math.abs(right)/degrees)
+    -- Pilot observation: left-UP/right-DOWN banks left on this aircraft.
+    local left=(input.pitch-input.bank)*degrees
+    local right=(input.pitch+input.bank)*degrees
+    local scale=degrees>0 and math.max(1,math.abs(left)/degrees,math.abs(right)/degrees) or 1
     local function rounded(v) return math.floor(math.abs(v)/scale+0.5)*(v<0 and -1 or 1) end
-    return {left=rounded(left),right=rounded(right),throttle=throttle}
+    return {left=rounded(left),right=rounded(right),throttle=throttle,pitchAssist=input.pitch,yawAssist=input.bank}
+end
+-- Forward-facing diamond layout, viewed from behind toward the nose.
+-- This changes pitch/yaw torque by reducing opposing engines; it cannot produce axial roll.
+function M.vectorConfig(custom)
+    local c={enabled=true,authority=0.25,pitchSign=1,yawSign=1,
+        top='thruster_9',bottom='thruster_8',left='thruster_11',right='thruster_10'}
+    if custom==false then c.enabled=false
+    elseif custom~=nil then
+        assert(type(custom)=='table','Invalid vectoring configuration')
+        for key in pairs(c) do if custom[key]~=nil then c[key]=custom[key] end end
+    end
+    assert(type(c.enabled)=='boolean' and M.finite(c.authority) and c.authority>=0 and c.authority<=1,'Invalid thrust authority')
+    assert((c.pitchSign==1 or c.pitchSign==-1) and (c.yawSign==1 or c.yawSign==-1),'Invalid thrust direction signs')
+    local seen={}
+    for _,side in ipairs({'top','bottom','left','right'}) do
+        assert(type(c[side])=='string' and not seen[c[side]],'Invalid/duplicate thruster mapping')
+        seen[c[side]]=true
+    end
+    return c
+end
+function M.thrustMix(names,base,pitch,yaw,c)
+    local out={}
+    assert(M.finite(base) and M.finite(pitch) and M.finite(yaw),'Invalid thrust demand')
+    base=M.clamp(base,0,1)
+    for _,name in ipairs(names) do out[name]=base end
+    if not c.enabled or base==0 then return out end
+    for _,side in ipairs({'top','bottom','left','right'}) do assert(out[c[side]]~=nil,'Unmapped '..side..' thruster') end
+    pitch=M.clamp(pitch*c.pitchSign,-1,1); yaw=M.clamp(yaw*c.yawSign,-1,1)
+    local p=pitch>=0 and c.top or c.bottom
+    local y=yaw>=0 and c.right or c.left
+    out[p]=base*(1-c.authority*math.abs(pitch))
+    out[y]=base*(1-c.authority*math.abs(yaw))
+    -- Quantise to 1% to avoid needless writes from sub-percent sensor noise.
+    for name,value in pairs(out) do out[name]=math.floor(value*100+0.5)/100 end
+    return out
 end
 -- A pulse requires a new Space press; holding it cannot restart an expired pulse.
 function M.pulse(s,input,now,count)
@@ -132,11 +168,14 @@ function M.step(s, a, input, dt, c)
     s.pitchRate=(s.pitchRate or 0)+alpha*(pr-(s.pitchRate or 0))
     s.bankRate=(s.bankRate or 0)+alpha*(br-(s.bankRate or 0))
     s.lastPitch=a.pitch; s.lastBank=a.bank
-    local common=(c.pitchKp*M.wrap(s.pitch-a.pitch)-c.pitchKd*s.pitchRate)*c.pitchSurfaceSign
+    local pitchEffort=c.pitchKp*M.wrap(s.pitch-a.pitch)-c.pitchKd*s.pitchRate
+    local common=pitchEffort*c.pitchSurfaceSign
     local differential=(c.bankKp*M.wrap(s.bank-a.bank)-c.bankKd*s.bankRate)*c.bankSurfaceSign
     local left,right=common+differential,common-differential
     local scale=math.max(1,math.abs(left)/c.maxSurface,math.abs(right)/c.maxSurface)
     local function round(v) return math.floor(math.abs(v)/scale+0.5)*(v<0 and -1 or 1) end
-    return {left=round(left),right=round(right),throttle=s.throttle}
+    return {left=round(left),right=round(right),throttle=s.throttle,
+        pitchAssist=M.clamp(pitchEffort/c.maxSurface,-1,1),
+        yawAssist=s.mode=='HOME' and M.clamp(s.bank/c.maxAPBank,-1,1) or input.bank}
 end
 return M

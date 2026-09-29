@@ -164,7 +164,11 @@ function M.run(action,root,get)
     local manifest=assert(textutils.unserializeJSON(get(repository..'main/FighterJet/release.json?check='..os.epoch('utc'))),'Invalid manifest JSON')
     local total=M.validate(manifest)
     if current then
-        if not M.newer(manifest.version,current.version) then print('Up to date: '..current.version); return end
+        if not M.newer(manifest.version,current.version) then
+            -- Repair launchers left behind by older installers, even with current code.
+            if action=='apply' then write(fs.combine(root,'run.lua'),M.launcher(root,false)) end
+            print('Up to date: '..current.version); return
+        end
         print('Available: '..current.version..' -> '..manifest.version)
         if action=='check' then print('Run '..root..'/update apply to install.'); return end
     end

@@ -1,6 +1,6 @@
 -- Cooperative integration harness: execute the actual computer-5 program against peripherals.
 local realPrint,realClock,realEpoch,realID=print,os.clock,os.epoch,os.getComputerID
-local function run(mode)
+local function run(mode,angle)
     local clock,latest,commandSent,reboots,writes=0,nil,false,{},{}
     local terminated=false
     local config=dofile('FighterJet/jet_config.lua')
@@ -108,7 +108,7 @@ local function run(mode)
         if path=='FighterJet/jet_config.lua' then return function() return config end end
         return realLoad(path,...)
     end
-    local ok,err=pcall(realLoad('FighterJet/flight.lua'),commissioning and mode or (mode=='preview' and 'preview' or 'live'))
+    local ok,err=pcall(realLoad('FighterJet/flight.lua'),commissioning and mode or (mode=='preview' and 'preview' or 'live'),angle)
     _G.loadfile=realLoad
     assert(ok,tostring(err))
     assert(commandSent)
@@ -126,10 +126,20 @@ local function run(mode)
         assert(starts[1].name=='thruster_8' and starts[2].name=='thruster_9','Wrong selected thruster')
         for _,w in ipairs(writes) do if w[2]=='setOutputs' then assert(not w[3] and not w[4],'Thruster test moved wings') end end
     elseif mode=='commission' then
-        assert(latest.mode=='DIRECT TEST' and #starts==4)
+        assert(latest.mode=='DIRECT TEST' and #starts>=4)
         local moved=false
-        for _,w in ipairs(writes) do if w[2]=='setLimit' and w[3]==5 then moved=true end end
-        assert(moved,'Direct pilot inputs did not move surfaces')
+        for _,w in ipairs(writes) do if w[2]=='setLimit' and w[3]==(tonumber(angle) or 20) then moved=true end end
+        if tonumber(angle)==0 then
+            for _,w in ipairs(writes) do if w[2]=='setOutputs' then assert(not w[3] and not w[4]) end end
+        else assert(moved,'Direct pilot inputs did not move surfaces') end
+        local topReduced,rightReduced=false,false
+        for _,w in ipairs(writes) do
+            if w[2]=='setThrottle' and w[3]==0.75 then
+                if w[1]=='thruster_9' then topReduced=true end
+                if w[1]=='thruster_10' then rightReduced=true end
+            end
+        end
+        assert(topReduced and rightReduced,'Combined S+D must reduce top/right engines')
         assert(fakeFiles['FighterJet/commission.csv']:find('seconds,gx,gz',1,true))
     elseif mode=='sensor_failure' then assert(latest.fault and latest.fault:find('gimbal detached',1,true))
     elseif mode=='setter_failure' then assert(latest.fault and latest.fault:find('gear failed after write',1,true))
@@ -137,5 +147,7 @@ local function run(mode)
     else assert(latest.mode=='HOLD','HUD failure changed flight mode') end
 end
 for _,mode in ipairs({'preview','live','override','sensor_failure','setter_failure','commission','thruster'}) do run(mode) end
+run('commission','40')
+run('commission','0')
 print,os.clock,os.epoch,os.getComputerID=realPrint,realClock,realEpoch,realID
 print('Actual flight runtime: preview, live, pilot override, sensor/actuator faults, cleanup, HUD reboot and commissioning tests passed')

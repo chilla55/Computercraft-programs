@@ -86,7 +86,8 @@ Before live operation, configure `jet_config.lua` on **both** computers:
   the nose; positive differential demand must bank right. Mechanical surface
   directions are established, but aerodynamic torque signs are not.
 - Check all four thrusters push forward, then set `thrustersVerified=true`.
-  They operate together at 0 or 1; there is no differential engine steering.
+  Space/Shift select base thrust on/off; differential assist can reduce
+  individual engines while base thrust is on.
 - Set `calibrated=true` only after those sensor/control signs are checked.
   Flight refuses live mode if either verification flag is false.
 
@@ -135,29 +136,41 @@ is for identifying hardware, not flying the aircraft. Ctrl+T on 5 ends it.
 After identifying the thrusters, stop the individual test and run on 5:
 
 ```
-/fighter/run commission 5
+/fighter/run commission 20
 ```
 
-`5` is the maximum surface deflection in degrees (1..10 accepted). The default
-is 5. Typewriter control uses the established *mechanical* wing directions:
+`20` is the maximum surface deflection in degrees (0..40 accepted). The default
+is 20. Release 0.1.2 reverses A/D based on the pilot's observed bank direction. Typewriter control uses the established *mechanical* wing directions:
 
 | Key | Direct command |
 | --- | --- |
 | S | Both trailing edges UP |
 | W | Both trailing edges DOWN |
-| D | Left trailing edge UP, right DOWN |
-| A | Left trailing edge DOWN, right UP |
-| Space | Latch all four thrusters at full thrust |
+| D | Left trailing edge DOWN, right UP |
+| A | Left trailing edge UP, right DOWN |
+| Space | Latch full base thrust; differential assist may reduce individual engines |
 | Left Shift | Latch thrust off |
 | Release W/S/A/D | Surfaces return to neutral; no attitude hold |
 
+If 20 degrees is still insufficient, explicitly select 30 or 40. Forty degrees
+is the original spring limit observed in the hardware tests, not a proven
+aerodynamic optimum. Live stabilization keeps its separate configured limit
+and calibration signs; commissioning does not change those settings. The
+observed roll response requires `bankSurfaceSign=-1` once the bank sensor
+is mapped to positive-right-wing-down. New configs use that sign; existing
+config files are preserved, so update that field before enabling live mode.
+
 Pitch/roll inputs can be combined; the mixture is scaled to the selected
-maximum angle. These are mechanical commands, **not yet verified nose/bank
-directions**. Keep initial test inputs brief. Once the aircraft has flying
+maximum angle. Wing pitch direction remains unverified; A/D was reversed
+after the pilot reported the original bank direction was inverted. Engine
+assist uses the rear-view thruster layout described below. Keep initial test inputs brief. Once the aircraft has flying
 speed, observe the actual nose/bank response to S and D separately and compare
 with the raw GX/GZ readings on the HUD. For example, report “S raised the nose,
 GZ increased” or “D lowered the left wing, GX decreased.” That establishes the
-sensor axis/sign and the corresponding aerodynamic correction sign. Reverse
+sensor axis/sign and the corresponding correction direction. With engine assist active this is the
+combined aircraft response, not an isolated measurement of wing torque. To
+verify the wing correction signs independently, set `vectoring=false` in
+`/fighter/jet_config.lua`, restart the test, and repeat with wings alone. Reverse
 commands remain available throughout; there is no computer-imposed attitude
 correction during this mode. Never enable live stabilization merely to make
 these tests available.
@@ -175,13 +188,73 @@ requests are rejected, HUD auto-reboot is disabled during tests, and Ctrl+T
 releases outputs. Tests do not become a saved startup mode. After testing,
 normal `/fighter/run` again uses your preserved preview/live startup selection.
 
+## Differential thrust assist (0.1.2)
+
+The confirmed rear-view layout is top=9, bottom=8, left=11, right=10. With
+all engines pointing forward, unequal thrust supplies **pitch and yaw** torque.
+Wing surfaces still supply roll; this software does not physically swivel
+thrusters or provide direct roll torque from them.
+
+Assist is enabled by default at **25% maximum engine reduction**, including
+existing configurations without a `vectoring` field. At full base thrust:
+
+- Nose-up demand reduces top thruster 9 toward 75%; bottom 8 stays at 100%.
+- Nose-down demand reduces bottom 8; top 9 stays at 100%.
+- Right-yaw demand reduces right thruster 10; left 11 stays at 100%.
+- Left-yaw demand reduces left thruster 11; right 10 stays at 100%.
+
+Commands can combine pitch and yaw. Neutral inputs restore equal engine power
+in commissioning, and Shift always makes every engine zero. This loses some
+forward thrust during a correction because engines already at 100% cannot be
+increased further. Torque magnitude depends on each engine's offset from the
+craft's centre of mass and still requires physical testing.
+
+In commissioning, S/W command nose-up/down thrust assist and D/A command
+right/left yaw assist, alongside the direct surfaces. There is no attitude
+feedback. To test differential thrust **with wings kept neutral**, use:
+
+```
+/fighter/run commission 0
+```
+
+For combined control at larger surface angles:
+
+```
+/fighter/run commission 20
+```
+
+In calibrated live operation, pitch assist follows pitch error/rate correction.
+Yaw assist follows A/D input, or the HOME turn demand. It is feedforward turn
+assistance, not yaw-angle or sideslip stabilization; the gimbal has no heading
+measurement. The individual `thruster` pulse test bypasses all mixing.
+
+To override defaults, add this top-level field to `/fighter/jet_config.lua`
+(do not replace the rest of your config):
+
+```lua
+vectoring = {
+    enabled = true,
+    authority = 0.25, -- 0..1 maximum opposing-engine reduction
+    pitchSign = 1, yawSign = 1,
+    top = "thruster_9", bottom = "thruster_8",
+    left = "thruster_11", right = "thruster_10",
+},
+```
+
+Set `vectoring=false` to test wings alone. Changing the configuration requires
+restarting the controller. Config files are preserved by updates; the runtime
+uses the documented defaults for this newly added optional field. The HUD's
+commissioning title shows V25 for 25% authority, and the trace records each
+individual engine command as well as the surface commands. The engine test
+names remain mapped as the user reported; calibration flags stay unchanged.
+
 ## Pilot controls
 
 | Input | Action |
 | --- | --- |
 | W / S | Nose down / nose up |
 | A / D | Bank left / right |
-| Space | Latch full thrust |
+| Space | Latch full base thrust (individual engines may be reduced by assist) |
 | Left Shift | Latch thrust off; wins if Space is also held |
 | Release W/S/A/D | Capture current pitch/bank on that axis and hold it |
 

@@ -58,7 +58,8 @@ function M.render(ui,core,flightCore,c,w,h,packet,sensorsFresh,radar,radarFresh,
         if d.gimbal then valid,pitch,bank=pcall(flightCore.attitude,d.gimbal,c.flight) end
         if linkFresh and status.commission then
             local test=status.commission
-            f.text(1,2,test.kind=='thruster' and test.thruster or ('DIRECT '..test.degrees..' DEG'),'4')
+            local assist=status.vectoring and status.vectoring.enabled and math.floor(status.vectoring.authority*100) or 0
+            f.text(1,2,test.kind=='thruster' and test.thruster or ('DIRECT '..test.degrees..' V'..assist),'4')
             f.text(1,3,'NO ATTITUDE HOLD','4')
             f.text(1,4,'GX '..core.number(d.gimbal and d.gimbal[1],2))
             f.text(1,5,'GZ '..core.number(d.gimbal and d.gimbal[2],2))

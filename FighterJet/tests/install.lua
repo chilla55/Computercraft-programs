@@ -85,6 +85,12 @@ assert(not data['/fighter/run.lua']:find('http',1,true),'Launcher must not check
 local startup=data['/startup.lua']; local beforeMoves=moves
 installer.run('install','/fighter',get)
 assert(moves==beforeMoves and data['/startup.lua']==startup,'Reinstall should not proliferate backups')
+-- Same-version apply must repair a legacy launcher which drops arguments.
+data['/fighter/run.lua']='old launcher without argument forwarding'
+installer.run('check','/fighter',get)
+assert(data['/fighter/run.lua']=='old launcher without argument forwarding')
+installer.run('apply','/fighter',get)
+assert(data['/fighter/run.lua']==installer.launcher('/fighter',false))
 -- Check does not write/apply; damaged downloads never replace active release.
 version='fighter-0.2.0'
 installer.run('check','/fighter',get)

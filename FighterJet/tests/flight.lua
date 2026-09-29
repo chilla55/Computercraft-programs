@@ -10,7 +10,15 @@ local function sample(p,b)
 end
 -- Commissioning must be usable with both verification flags false.
 local direct=core.direct(core.input({83,68,32}),5,0)
-assert(direct.left==5 and direct.right==0 and direct.throttle==1)
+assert(direct.left==0 and direct.right==5 and direct.throttle==1)
+for _,angle in ipairs({5,20,30,40}) do
+    local left=core.direct(core.input({65}),angle,0)
+    local right=core.direct(core.input({68}),angle,0)
+    assert(left.left==angle and left.right==-angle,'A must reverse the old mapping')
+    assert(right.left==-angle and right.right==angle,'D must reverse the old mapping')
+    local mix=core.direct(core.input({83,68}),angle,0)
+    assert(mix.left==0 and mix.right==angle,'Mixed demand must remain within selected angle')
+end
 local neutral=core.direct(core.input({}),5,direct.throttle)
 assert(neutral.left==0 and neutral.right==0 and neutral.throttle==1)
 assert(core.direct(core.input({340}),5,1).throttle==0)
@@ -25,6 +33,21 @@ assert(pulse.selected==2,'Holding selection must not scroll continually')
 assert(core.pulse(pulse,core.input({32}),5,4)==1)
 assert(core.pulse(pulse,core.input({32,340}),5.1,4)==0)
 assert(core.pulse(pulse,core.input({32}),5.2,4)==0,'Shift must require Space release before firing again')
+local names={'thruster_8','thruster_9','thruster_10','thruster_11'}
+local v=core.vectorConfig(nil)
+local t=core.thrustMix(names,1,1,1,v)
+assert(t.thruster_8==1 and t.thruster_9==0.75 and t.thruster_10==0.75 and t.thruster_11==1)
+t=core.thrustMix(names,1,-1,-1,v)
+assert(t.thruster_8==0.75 and t.thruster_9==1 and t.thruster_10==1 and t.thruster_11==0.75)
+for _,value in pairs(core.thrustMix(names,0,1,1,v)) do assert(value==0,'Shift must kill all thrust') end
+for _,value in pairs(core.thrustMix(names,1,1,1,core.vectorConfig(false))) do assert(value==1,'Disabled assist changed thrust') end
+for pitch=-3,3 do for yaw=-3,3 do
+    for _,value in pairs(core.thrustMix(names,1,pitch,yaw,v)) do assert(value>=0.75 and value<=1) end
+end end
+assert(not pcall(core.vectorConfig,{authority=2}))
+assert(not pcall(core.vectorConfig,{top='thruster_8'}))
+local enginesOnly=core.direct(core.input({83,68}),0,1)
+assert(enginesOnly.left==0 and enginesOnly.right==0 and enginesOnly.pitchAssist==1 and enginesOnly.yawAssist==1)
 local s=core.new(c)
 core.step(s,sample(10,20),none,0.1,c)
 assert(s.pitch==10 and s.bank==20 and s.throttle==0)
@@ -69,7 +92,7 @@ s=core.new(c); s.pitch=0; s.bank=0
 local p,b=10,-10
 for i=1,150 do
     local d=core.step(s,sample(p,b),none,0.1,c)
-    p=p+(d.left+d.right)*0.05; b=b+(d.left-d.right)*0.05
+    p=p+(d.left+d.right)*0.05; b=b-(d.left-d.right)*0.05
 end
 assert(math.abs(p)<2 and math.abs(b)<2,'Feedback should reduce error')
 -- Session/ticket/revision/sequence reject stale AP commands.

@@ -13,6 +13,9 @@ return {
     -- Add structure entity identifiers once they appear in actual radar data.
     entityKinds = {},
     ranges = { 50, 100, 250 },
+    -- Variable individual engine power; Space still requests full base thrust.
+    vectoring = { enabled=true, authority=0.25, pitchSign=1, yawSign=1,
+        top="thruster_9", bottom="thruster_8", left="thruster_11", right="thruster_10" },
     navigation = "navigation_table_0", -- optional marker import only
     position = { name="directional_gearshift_2", method="getPosition" },
     homeDimension = "minecraft:overworld",
@@ -25,7 +28,7 @@ return {
         calibrated=false, thrustersVerified=false,
         pitchAxis=2, bankAxis=1, pitchSign=1, bankSign=1,
         pitchOffset=0, bankOffset=0,
-        pitchSurfaceSign=1, bankSurfaceSign=1,
+        pitchSurfaceSign=1, bankSurfaceSign=-1, -- observed wing roll response
         -- Positive surfaces mean trailing edge UP. Mechanical signs are tested.
         maxSurface=10, pitchKp=0.5, pitchKd=0.15, bankKp=0.5, bankKd=0.15,
         rateFilter=0.25, pitchLead=12, bankLead=20, maxPitch=60,

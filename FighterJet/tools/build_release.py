@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-version = sys.argv[1] if len(sys.argv) > 1 else 'fighter-0.1.1'
+version = sys.argv[1] if len(sys.argv) > 1 else 'fighter-0.1.2'
 assert re.fullmatch(r'fighter-\d+\.\d+\.\d+', version), 'Expected fighter-X.Y.Z'
 names = ['flight.lua', 'flight_core.lua', 'hardware.lua', 'jet_config.lua', 'jet_link.lua',
          'jet_store.lua', 'jet_paths.lua', 'hud.lua', 'hud_core.lua', 'hud_data.lua',
