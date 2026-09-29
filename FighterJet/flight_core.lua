@@ -38,6 +38,7 @@ end
 -- Forward-facing diamond layout, viewed from behind toward the nose.
 -- This changes pitch/yaw torque by reducing opposing engines; it cannot produce axial roll.
 function M.vectorConfig(custom)
+    -- Legacy defaults: new installs provide explicit IDs; saved remaps override these.
     local c={enabled=true,authority=0.25,pitchSign=1,yawSign=1,
         top='thruster_9',bottom='thruster_8',left='thruster_11',right='thruster_10'}
     if custom==false then c.enabled=false

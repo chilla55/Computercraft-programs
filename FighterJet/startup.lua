@@ -2,6 +2,15 @@ local arguments={...}
 -- Copy as startup.lua on each computer, alongside the fighter Lua files.
 local dir=fs.getDir(shell.getRunningProgram())
 local paths=assert(loadfile(fs.combine(dir,'jet_paths.lua')))()
+if arguments[1]=='remap' then
+    assert(os.getComputerID()==5 or os.getComputerID()==6,'Run remap on computer 5 or 6')
+    local map=paths.remap(dir,table.unpack(arguments,2))
+    print('Saved rear-view thruster mapping:')
+    print('Bottom '..map.bottom..'; top '..map.top)
+    print('Left '..map.left..'; right '..map.right)
+    print('No actuator writes. Restart the program to use this mapping.')
+    return
+end
 local c=paths.module(dir,'jet_config')
 if os.getComputerID()==c.flightID then
     -- Preview until the installer explicitly selects live in startup_mode.lua.

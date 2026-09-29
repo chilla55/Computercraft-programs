@@ -133,5 +133,43 @@ mkdir('/unrelated'); assert(not pcall(installer.run,'install','/unrelated',get))
 local paths=dofile('FighterJet/jet_paths.lua')
 assert(paths.root('/fighter/releases/fighter-0.2.0')=='/fighter')
 assert(paths.root('/standalone')=='/standalone')
+-- Remap existing persistent settings without actuator calls or config rewrites.
+textutils.serialize=textutils.serializeJSON
+textutils.unserialize=textutils.unserializeJSON
+peripheral={isPresent=function(n) return n~='thruster_99' end,
+    getMethods=function() return {'getThrottle','setThrottle'} end,
+    call=function() error('Remap must not call device methods') end}
+local oldLoad=loadfile
+local disabled=false
+_G.loadfile=function(path,...)
+    if path=='/fighter/jet_config.lua' then return function()
+        local vector={enabled=true,authority=0.6,yawSign=-1}
+        if disabled then vector=false end
+        return {custom='preserve',flight={pitchKp=0.123},thrusters={'thruster_8'},vectoring=vector}
+    end end
+    if path=='/fighter/hardware.lua' then return function() return {wings={unchanged=true}} end end
+    if path:match('/jet_store.lua$') then return oldLoad('FighterJet/jet_store.lua') end
+    return oldLoad(path,...)
+end
+local directory='/fighter/releases/fighter-0.2.0'
+local rawConfig=data['/fighter/jet_config.lua']
+paths.remap(directory,'12','13','15','14')
+local mapped=paths.module(directory,'jet_config')
+assert(table.concat(mapped.thrusters,',')=='thruster_12,thruster_13,thruster_14,thruster_15')
+assert(mapped.vectoring.bottom=='thruster_12' and mapped.vectoring.top=='thruster_13')
+assert(mapped.vectoring.left=='thruster_15' and mapped.vectoring.right=='thruster_14')
+assert(mapped.vectoring.authority==0.6 and mapped.vectoring.yawSign==-1 and mapped.flight.pitchKp==0.123)
+assert(data['/fighter/jet_config.lua']==rawConfig,'Remap overwrote user configuration')
+disabled=true
+assert(paths.module(directory,'jet_config').vectoring==false,'Remap enabled disabled assistance')
+disabled=false
+local hw=paths.module(directory,'hardware')
+assert(hw.wings.unchanged and hw.thrusterPositions.left=='thruster_15')
+assert(not pcall(paths.remap,directory,'12','12','15','14'),'Duplicate ID accepted')
+assert(not pcall(paths.remap,directory,'12','13','15','99'),'Missing thruster accepted')
+-- Interrupted alternate-slot write must leave the existing mapping usable.
+data['/fighter/thruster_map.a']='partial'
+assert(paths.module(directory,'jet_config').vectoring.bottom=='thruster_12')
+_G.loadfile=oldLoad
 print=realPrint
 print('Installer: interrupted download/write, checksums, preservation, manual update, offline rollback, retention and launchers passed')

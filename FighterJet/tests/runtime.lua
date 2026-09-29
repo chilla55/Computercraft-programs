@@ -10,7 +10,7 @@ local function run(mode,angle)
     local limits={torsion_spring_0=40,torsion_spring_1=40}
     local commands={directional_gearshift_2=0,directional_gearshift_3=0}
     local starts={}
-    local throttle={thruster_8=0,thruster_9=0,thruster_10=0,thruster_11=0}
+    local throttle={thruster_12=0,thruster_13=0,thruster_14=0,thruster_15=0}
     local fakeFiles={}; local stateSnapshots={}; local errors={}
     local function pause(d)
         local _,main=coroutine.running()
@@ -123,7 +123,7 @@ local function run(mode,angle)
     end
     if mode=='thruster' then
         assert(latest.mode=='THRUSTER TEST' and #starts==2,'Holding Space repeated the pulse')
-        assert(starts[1].name=='thruster_8' and starts[2].name=='thruster_9','Wrong selected thruster')
+        assert(starts[1].name=='thruster_12' and starts[2].name=='thruster_13','Wrong selected thruster')
         for _,w in ipairs(writes) do if w[2]=='setOutputs' then assert(not w[3] and not w[4],'Thruster test moved wings') end end
     elseif mode=='commission' then
         assert(latest.mode=='DIRECT TEST' and #starts>=4)
@@ -135,8 +135,8 @@ local function run(mode,angle)
         local topReduced,rightReduced=false,false
         for _,w in ipairs(writes) do
             if w[2]=='setThrottle' and w[3]==0.75 then
-                if w[1]=='thruster_9' then topReduced=true end
-                if w[1]=='thruster_10' then rightReduced=true end
+                if w[1]=='thruster_13' then topReduced=true end
+                if w[1]=='thruster_14' then rightReduced=true end
             end
         end
         assert(topReduced and rightReduced,'Combined S+D must reduce top/right engines')

@@ -22,8 +22,8 @@ return {
         },
     },
     -- Confirmed rear view looking toward the nose: diamond arrangement.
-    thrusters = { "thruster_8", "thruster_9", "thruster_10", "thruster_11" },
-    thrusterPositions = { top="thruster_9", bottom="thruster_8", left="thruster_11", right="thruster_10" },
+    thrusters = { "thruster_12", "thruster_13", "thruster_14", "thruster_15" },
+    thrusterPositions = { top="thruster_13", bottom="thruster_12", left="thruster_15", right="thruster_14" },
     sensors = { gimbal = "gimbal_sensor_1", velocity = "velocity_sensor_2",
         altitude = "altitude_sensor_1", radar = "create_radar:plane_radar_2" },
 }

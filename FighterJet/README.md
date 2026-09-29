@@ -39,6 +39,31 @@ That includes its selected startup mode. Defaults for a new release remain
 available inside `/fighter/releases/fighter-X.Y.Z/` for comparison; new
 configuration fields are not silently merged into your calibrated settings.
 
+## Relocated thrusters (0.1.3)
+
+Rear view looking toward the nose: **bottom 12, top 13, left 15, right 14**.
+New installs use that layout. Existing installations retain their config, so
+stop both programs while parked, update both, and run on **each computer**:
+
+```
+/fighter/update apply
+/fighter/run remap 12 13 15 14
+```
+
+The order is **BOTTOM TOP LEFT RIGHT**. Full peripheral names are also accepted.
+The command checks presence and thruster methods without firing any engine.
+It saves a small two-slot mapping (`thruster_map.a` / `.b`) that overrides just
+the thruster list and vectoring positions in the loaded config/hardware.
+Other settings, tuning, assist authority/signs, saved home, and startup mode
+are preserved. A disabled thrust assist remains disabled. To change the mapping
+again, rerun `remap`; this saved mapping takes precedence over IDs written in
+`jet_config.lua`. A rejected mapping leaves the previous one available.
+
+Restart computer 6's HUD with `/fighter/run`. On computer 5 first run
+`/fighter/run thruster` to check the relocated engines, then use
+`/fighter/run commission 20` for another flight trace. Do not enable calibrated
+live flight just because peripheral IDs have been updated.
+
 ## Manual updates and rollback
 
 Nothing checks for or installs updates at boot or in the background.
@@ -190,7 +215,7 @@ normal `/fighter/run` again uses your preserved preview/live startup selection.
 
 ## Differential thrust assist (0.1.2)
 
-The confirmed rear-view layout is top=9, bottom=8, left=11, right=10. With
+The confirmed rear-view layout is top=13, bottom=12, left=15, right=14. With
 all engines pointing forward, unequal thrust supplies **pitch and yaw** torque.
 Wing surfaces still supply roll; this software does not physically swivel
 thrusters or provide direct roll torque from them.
@@ -198,10 +223,10 @@ thrusters or provide direct roll torque from them.
 Assist is enabled by default at **25% maximum engine reduction**, including
 existing configurations without a `vectoring` field. At full base thrust:
 
-- Nose-up demand reduces top thruster 9 toward 75%; bottom 8 stays at 100%.
-- Nose-down demand reduces bottom 8; top 9 stays at 100%.
-- Right-yaw demand reduces right thruster 10; left 11 stays at 100%.
-- Left-yaw demand reduces left thruster 11; right 10 stays at 100%.
+- Nose-up demand reduces top thruster 13 toward 75%; bottom 12 stays at 100%.
+- Nose-down demand reduces bottom 12; top 13 stays at 100%.
+- Right-yaw demand reduces right thruster 14; left 15 stays at 100%.
+- Left-yaw demand reduces left thruster 15; right 14 stays at 100%.
 
 Commands can combine pitch and yaw. Neutral inputs restore equal engine power
 in commissioning, and Shift always makes every engine zero. This loses some
@@ -236,8 +261,8 @@ vectoring = {
     enabled = true,
     authority = 0.25, -- 0..1 maximum opposing-engine reduction
     pitchSign = 1, yawSign = 1,
-    top = "thruster_9", bottom = "thruster_8",
-    left = "thruster_11", right = "thruster_10",
+    top = "thruster_13", bottom = "thruster_12",
+    left = "thruster_15", right = "thruster_14",
 },
 ```
 

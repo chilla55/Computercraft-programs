@@ -8,14 +8,14 @@ return {
     altitude = "altitude_sensor_1", velocity = "velocity_sensor_2",
     gimbal = "gimbal_sensor_1", typewriter = "linked_typewriter_1",
     engine = "simulated:portable_engine_0", barrel = "sophisticatedstorage:barrel_3",
-    thrusters = { "thruster_8", "thruster_9", "thruster_10", "thruster_11" },
+    thrusters = { "thruster_12", "thruster_13", "thruster_14", "thruster_15" },
     -- Exact radar entityType -> player / hostile / passive / structure / unknown.
     -- Add structure entity identifiers once they appear in actual radar data.
     entityKinds = {},
     ranges = { 50, 100, 250 },
     -- Variable individual engine power; Space still requests full base thrust.
     vectoring = { enabled=true, authority=0.25, pitchSign=1, yawSign=1,
-        top="thruster_9", bottom="thruster_8", left="thruster_11", right="thruster_10" },
+        top="thruster_13", bottom="thruster_12", left="thruster_15", right="thruster_14" },
     navigation = "navigation_table_0", -- optional marker import only
     position = { name="directional_gearshift_2", method="getPosition" },
     homeDimension = "minecraft:overworld",
