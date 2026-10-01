@@ -17,7 +17,7 @@ if os.getComputerID()==c.flightID then
     local mode=arguments[1] or 'preview'
     local path=fs.combine(paths.root(dir),'startup_mode.lua')
     if not arguments[1] and fs.exists(path) then mode=assert(loadfile(path))() end
-    assert(mode=='preview' or mode=='live' or (arguments[1] and (mode=='commission' or mode=='thruster')),'Invalid startup mode')
+    assert(mode=='preview' or mode=='live' or (arguments[1] and (mode=='assist' or mode=='commission' or mode=='thruster')),'Invalid startup mode')
     if arguments[2] then shell.run(fs.combine(dir,'flight.lua'),mode,arguments[2])
     else shell.run(fs.combine(dir,'flight.lua'),mode) end
 elseif os.getComputerID()==c.hudID then

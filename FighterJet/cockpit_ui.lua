@@ -55,7 +55,8 @@ function M.render(ui,core,flightCore,c,w,h,packet,sensorsFresh,radar,radarFresh,
         f.text(1,8,'ERR '..core.number(d.errorCount))
     elseif page=='horizon' then
         local valid,pitch,bank=false,nil,nil
-        if d.gimbal then valid,pitch,bank=pcall(flightCore.attitude,d.gimbal,c.flight) end
+        local assist=linkFresh and status.assist
+        if d.gimbal then valid,pitch,bank=pcall(flightCore.attitude,d.gimbal,assist and assist.profile or c.flight) end
         if linkFresh and status.commission then
             local test=status.commission
             local assist=status.vectoring and status.vectoring.enabled and math.floor(status.vectoring.authority*100) or 0
@@ -70,7 +71,7 @@ function M.render(ui,core,flightCore,c,w,h,packet,sensorsFresh,radar,radarFresh,
                 f.text(1,7,'W/S BOTH A/D MIX','b')
             end
             f.text(1,8,'THRUST '..core.number(test.throttle*100)..'%')
-        elseif valid and c.flight.calibrated then
+        elseif valid and (c.flight.calibrated or assist) then
             local cx,cy=(w+1)/2,(h+2)/2
             local angle=math.rad(bank)
             for y=3,h-2 do
@@ -82,6 +83,7 @@ function M.render(ui,core,flightCore,c,w,h,packet,sensorsFresh,radar,radarFresh,
             end
             f.text(math.floor(cx)-1,math.floor(cy),'-+-','4')
             f.text(1,2,'P'..core.number(pitch,1)..' B'..core.number(bank,1))
+            if assist then f.text(1,h-2,'ASSIST TUNING','4') end
         else
             f.text(1,3,d.gimbal and 'CALIBRATE AXES' or 'NO GIMBAL','4')
             f.text(1,4,'GX '..core.number(d.gimbal and d.gimbal[1],1))

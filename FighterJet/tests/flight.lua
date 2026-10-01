@@ -131,3 +131,51 @@ for page=1,#ui.pages do
     end
 end
 print('Flight control, navigation, protocol, watchdog and cockpit tests passed')
+
+-- Active assistance uses observed signs without changing persistent calibration.
+local ac=core.assistConfig(c)
+assert(ac.bankSign==-1 and c.bankSign==1 and ac.maxSurface==40)
+local pitch,bank=core.attitude({-12,7},ac)
+assert(pitch==7 and bank==12)
+local s=core.new(ac)
+core.step(s,sample(),none,0.1,ac)
+local out=core.step(s,sample(0,10),none,0.1,ac)
+assert(out.left>out.right,'Rightward disturbance must command left roll')
+assert(out.yawAssist==0,'Bank stabilization must not introduce unmeasured yaw')
+assert(out.left<=40 and out.right>=-40)
+s=core.new(ac)
+core.step(s,sample(),none,0.1,ac)
+out=core.step(s,sample(10,0),none,0.1,ac)
+assert(out.left<0 and out.right<0 and out.pitchAssist<0,'Pitch-up motion must be damped nose-down')
+s=core.new(ac)
+core.step(s,sample(),core.input({83,68}),0.1,ac)
+out=core.step(s,sample(3,4),none,0.1,ac)
+assert(s.pitch==3 and s.bank==4,'Release must capture current attitude')
+assert(out.left+out.right<0 and out.right-out.left<0,'Release must brake both rotation rates')
+-- Inertial toy plant: rate input, release and simultaneous disturbance recovery.
+-- Verifies feedback direction/convergence, not actual Minecraft aerodynamic gains.
+s=core.new(ac)
+local p,b,pr,br=0,0,0,0
+for i=1,400 do
+    local input=i<=20 and core.input({83,68}) or none
+    local demand=core.step(s,sample(p,b),input,0.05,ac)
+    pr=pr+((demand.left+demand.right)/2*4-pr*0.2)*0.05
+    br=br+((demand.right-demand.left)/2*4-br*0.2)*0.05
+    p=p+pr*0.05; b=b+br*0.05
+    if i==160 then pr=pr+15; br=br-20 end
+    assert(math.abs(demand.left)<=40 and math.abs(demand.right)<=40)
+end
+assert(math.abs(p-s.pitch)<2 and math.abs(b-s.bank)<2,'Attitude hold failed to recover disturbance')
+assert(math.abs(pr)<2 and math.abs(br)<2,'Rotation was not damped')
+assert(not pcall(core.assistConfig,c,{pitchKd=-1}))
+print('Assisted rate control, attitude capture, disturbance recovery and bounds passed')
+
+config.flight.calibrated=false
+local display=ui.new(config); display.page=1
+-- Find horizon without relying on page ordering.
+for i,name in ipairs(ui.pages) do if name=='horizon' then display.page=i end end
+local rows=ui.render(display,render,core,config,15,10,{data={gimbal={-12,7}}},true,nil,false,
+    {healthy=true,live=true,mode='MANUAL',assist={profile=ac}},true,0)
+local text=''; for _,row in ipairs(rows) do text=text..row[1]..'\n' end
+assert(text:find('ASSIST TUNING',1,true),'HUD must show active assist despite saved calibration=false')
+assert(text:find('B12.0',1,true),'HUD must use active negative GX bank sign')

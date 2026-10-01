@@ -4,8 +4,10 @@ local function run(mode,angle)
     local clock,latest,commandSent,reboots,writes=0,nil,false,{},{}
     local terminated=false
     local config=dofile('FighterJet/jet_config.lua')
+    local assisting=mode=='assist'
     local commissioning=mode=='commission' or mode=='thruster'
-    config.flight.calibrated=not commissioning; config.flight.thrustersVerified=not commissioning
+    local tuning=commissioning or assisting
+    config.flight.calibrated=not tuning; config.flight.thrustersVerified=not tuning
     config.recovery.grace=1; config.recovery.timeout=1; config.recovery.cooldown=1; config.recovery.maxAttempts=2
     local limits={torsion_spring_0=40,torsion_spring_1=40}
     local commands={directional_gearshift_2=0,directional_gearshift_3=0}
@@ -52,6 +54,7 @@ local function run(mode,angle)
     _G.peripheral={call=function(name,method,a,b)
         if method=='getAngles' then
             if mode=='sensor_failure' and clock>2 then error('gimbal detached') end
+            if assisting and clock>2 then return {-10,5} end
             return {0,0}
         end
         if method=='getPressedKeyCodes' then
@@ -108,11 +111,11 @@ local function run(mode,angle)
         if path=='FighterJet/jet_config.lua' then return function() return config end end
         return realLoad(path,...)
     end
-    local ok,err=pcall(realLoad('FighterJet/flight.lua'),commissioning and mode or (mode=='preview' and 'preview' or 'live'),angle)
+    local ok,err=pcall(realLoad('FighterJet/flight.lua'),tuning and mode or (mode=='preview' and 'preview' or 'live'),angle)
     _G.loadfile=realLoad
     assert(ok,tostring(err))
     assert(commandSent)
-    if commissioning then assert(not acceptedMode and latest.ack and not latest.ack.ok,'Commissioning accepted autopilot')
+    if tuning then assert(not acceptedMode and latest.ack and not latest.ack.ok,'Commissioning accepted autopilot')
     else assert(acceptedMode,'Runtime must process a fresh mode request') end
     if mode=='preview' then assert(#writes==0 and #reboots==0,'Preview wrote hardware')
     else
@@ -141,12 +144,21 @@ local function run(mode,angle)
         end
         assert(topReduced and rightReduced,'Combined S+D must reduce top/right engines')
         assert(fakeFiles['FighterJet/commission.csv']:find('seconds,gx,gz',1,true))
+    elseif assisting then
+        assert(latest.mode=='MANUAL' and latest.assist and not latest.calibrated)
+        local corrected=false
+        for _,w in ipairs(writes) do
+            if w[2]=='setOutputs' and (w[3] or w[4]) then corrected=true end
+        end
+        assert(corrected,'No active wing correction without pilot keys')
+        assert(fakeFiles['FighterJet/assist.csv']:find('rightMeasured,rightAge,leftMeasured,leftAge',1,true))
+        assert(not latest.fault,'Assisted runtime fault: '..tostring(latest.fault))
     elseif mode=='sensor_failure' then assert(latest.fault and latest.fault:find('gimbal detached',1,true))
     elseif mode=='setter_failure' then assert(latest.fault and latest.fault:find('gear failed after write',1,true))
     elseif mode=='override' then assert(latest.mode=='MANUAL','Pilot did not override AP')
     else assert(latest.mode=='HOLD','HUD failure changed flight mode') end
 end
-for _,mode in ipairs({'preview','live','override','sensor_failure','setter_failure','commission','thruster'}) do run(mode) end
+for _,mode in ipairs({'preview','live','override','sensor_failure','setter_failure','commission','thruster','assist'}) do run(mode) end
 run('commission','40')
 run('commission','0')
 print,os.clock,os.epoch,os.getComputerID=realPrint,realClock,realEpoch,realID

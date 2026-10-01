@@ -16,6 +16,26 @@ function M.attitude(a, c)
     assert(M.finite(p) and M.finite(b), 'Invalid gimbal angles')
     return M.wrap((p-c.pitchOffset)*c.pitchSign), M.wrap((b-c.bankOffset)*c.bankSign)
 end
+-- Explicit tuning mode: observed upright signs, independent of saved calibration flags.
+-- This profile does not certify the aircraft or enable navigation/autopilot.
+function M.assistConfig(base, custom)
+    local c={}; for k,v in pairs(base) do c[k]=v end
+    local defaults={pitchAxis=2,bankAxis=1,pitchSign=1,bankSign=-1,
+        pitchOffset=0,bankOffset=0,pitchSurfaceSign=1,bankSurfaceSign=-1,
+        maxSurface=40,pitchKp=0.6,bankKp=0.6,pitchKd=0.5,bankKd=0.4,
+        pitchRateLimit=25,bankRateLimit=40,rateFilter=0.15}
+    assert(custom==nil or type(custom)=='table','Invalid assist profile')
+    for k,v in pairs(defaults) do c[k]=custom and custom[k] or v end
+    for k in pairs(defaults) do assert(M.finite(c[k]),'Invalid assist '..k) end
+    for _,k in ipairs({'pitchKp','bankKp','pitchKd','bankKd','rateFilter'}) do
+        assert(c[k]>0 and c[k]<=10,'Invalid assist '..k)
+    end
+    for _,k in ipairs({'pitchRateLimit','bankRateLimit'}) do
+        assert(c[k]>0 and c[k]<=90,'Invalid assist '..k)
+    end
+    c.rateControl=true
+    return c
+end
 function M.input(codes)
     assert(type(codes) == 'table', 'Invalid typewriter data')
     local held = {}
@@ -170,13 +190,18 @@ function M.step(s, a, input, dt, c)
     s.bankRate=(s.bankRate or 0)+alpha*(br-(s.bankRate or 0))
     s.lastPitch=a.pitch; s.lastBank=a.bank
     local pitchEffort=c.pitchKp*M.wrap(s.pitch-a.pitch)-c.pitchKd*s.pitchRate
+    local bankEffort=c.bankKp*M.wrap(s.bank-a.bank)-c.bankKd*s.bankRate
+    if c.rateControl and s.mode=='MANUAL' then
+        if input.pitch~=0 then pitchEffort=c.pitchKd*(input.pitch*c.pitchRateLimit-s.pitchRate) end
+        if input.bank~=0 then bankEffort=c.bankKd*(input.bank*c.bankRateLimit-s.bankRate) end
+    end
     local common=pitchEffort*c.pitchSurfaceSign
-    local differential=(c.bankKp*M.wrap(s.bank-a.bank)-c.bankKd*s.bankRate)*c.bankSurfaceSign
+    local differential=bankEffort*c.bankSurfaceSign
     local left,right=common+differential,common-differential
     local scale=math.max(1,math.abs(left)/c.maxSurface,math.abs(right)/c.maxSurface)
     local function round(v) return math.floor(math.abs(v)/scale+0.5)*(v<0 and -1 or 1) end
     return {left=round(left),right=round(right),throttle=s.throttle,
         pitchAssist=M.clamp(pitchEffort/c.maxSurface,-1,1),
-        yawAssist=s.mode=='HOME' and M.clamp(s.bank/c.maxAPBank,-1,1) or input.bank}
+        yawAssist=c.rateControl and 0 or s.mode=='HOME' and M.clamp(s.bank/c.maxAPBank,-1,1) or input.bank}
 end
 return M

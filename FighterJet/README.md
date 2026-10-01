@@ -39,6 +39,51 @@ That includes its selected startup mode. Defaults for a new release remain
 available inside `/fighter/releases/fighter-X.Y.Z/` for comparison; new
 configuration fields are not silently merged into your calibrated settings.
 
+## Active stabilization (0.1.4)
+
+Stop both programs while parked, then run `/fighter/update apply` on both computers.
+Start the HUD on **6** with `/fighter/run`, and the controller on **5** with:
+
+```
+/fighter/run assist
+```
+
+This explicit tuning mode works with the existing configuration and saved thruster
+remap. It leaves calibration flags and startup mode unchanged. The terminal says
+**ASSIST - TUNING** and the HUD shows **ASSIST TUNING** on the artificial horizon.
+
+- W/S request pitch rotation, up to 25 degrees/second; A/D request bank rotation,
+  up to 40 degrees/second. These are controller requests, not guaranteed limits.
+- Releasing either axis captures its current attitude. Feedback opposes further
+  rotation and returns toward that captured angle. It does not automatically level
+  the plane or hold altitude.
+- Wings mix pitch and roll continuously, with up to 40 degrees of deflection.
+  Space latches full base thrust; Shift turns all engines off. Pitch feedback also
+  modulates top/bottom thrust using the configured authority (default 25%). Bank
+  control uses the wings; this mode adds no open-loop differential yaw thrust.
+- HUD loss does not stop assistance. Computer 5 retains its output watchdogs and
+  may restart computer 6 under the existing recovery policy. Autopilot/configuration
+  requests are rejected during assist tuning; computer 5 is never auto-rebooted.
+
+The provisional profile uses pitch **+GZ**, bank **-GX**, based on the pilot's
+observations and commissioning traces. It overrides the old saved axis/gain values
+in memory only. Optional `assist = {...}` overrides in `/fighter/jet_config.lua`
+allow tuning `pitchKp`, `pitchKd`, `bankKp`, `bankKd`, `pitchRateLimit`,
+`bankRateLimit`, `rateFilter`, `maxSurface`, axis indices, signs and offsets.
+The HUD uses the active profile supplied by computer 5 with its direct gimbal read.
+These gains are tested in software, not yet verified in flight. The two tilt
+readings are coupled at extreme attitudes; this is not validated inverted-flight
+recovery. Begin upright and use small inputs for the first assisted trace.
+
+`/fighter/assist.csv` is overwritten each assisted run and capped at 128 KiB.
+It includes raw angles, mapped angles, targets, filtered rotation rates, requested
+surfaces, measured spring angles with their sample ages, and last written engine
+commands. Measured spring angles use positive trailing-edge-UP on both sides.
+Engine columns are command acknowledgements, not measured thrust. During a held
+key the rate request controls that axis; attitude targets matter after release.
+Logging failure stops the trace, not the flight controller. Send this log to tune
+real response and check for reversed corrections or oscillation.
+
 ## Relocated thrusters (0.1.3)
 
 Rear view looking toward the nose: **bottom 12, top 13, left 15, right 14**.
