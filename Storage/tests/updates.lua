@@ -364,3 +364,27 @@ fs.open=realOpen
 monitor.saveHistory(compactPath,cfg,large)
 eq(#monitor.loadHistory(compactPath,cfg,1005).samples,61)
 print('History compression, legacy migration, low-space recovery and failed-write cleanup passed')
+
+-- Configure and restart with only a ticker and monitor connected.
+local originalNames=peripheral.getNames
+peripheral.getNames=function() return {'ticker','display'} end
+files[path..'.cfg']=nil
+pending={}; scripted={{'char','q'}}
+local responses={'1','1'}
+read=function() local answer=table.remove(responses,1); assert(answer,'Unexpected vault prompt'); return answer end
+local beforeReads=capacityReads
+monitor.main({}, {program=path})
+local historyConfig=decode(files[path..'.cfg'])
+eq(#historyConfig.vaults,0); eq(historyConfig.ticker,'ticker'); eq(capacityReads,beforeReads)
+assert(#monitor.loadHistory(path..'.history',historyConfig,1000).samples>0)
+pending={}; scripted={{'char','q'}}
+read=function() error('History-only restart should not prompt') end
+monitor.main({}, {program=path})
+-- The same mode can be selected explicitly with 0 when inventories exist.
+peripheral.getNames=originalNames
+pending={}; scripted={{'char','q'}}
+responses={'1','1','0'}
+read=function() return assert(table.remove(responses,1)) end
+monitor.main({'--configure'}, {program=path})
+eq(#decode(files[path..'.cfg']).vaults,0); eq(capacityReads,beforeReads)
+print('Ticker-only setup, persisted configuration and explicit zero-vault selection passed')

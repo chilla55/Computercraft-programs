@@ -44,6 +44,22 @@ To migrate a standalone installation, stop it and copy its existing
 `stock_monitor.lua.cfg` and `stock_monitor.lua.history` (if present) into `storage/`
 before launching. Adjust names if the old program used a different filename.
 
+## Networks without vaults
+
+For a network without Item Vaults, connect its Stock Ticker and monitor, then
+select **0: No vaults (network history only)** during setup. If no inventories
+are connected, setup selects this mode automatically after you choose the ticker.
+A ticker is required when there are no selected vaults.
+
+The monitor displays the network total and the full-screen one-minute/five-minute
+history table. It omits vault counts, capacity, the fill gauge, and the summary
+view button. Previous/next page buttons and sortable column headers still work.
+History is saved and restored as usual. If the ticker disconnects, the display
+reports unavailable data, resets the trend window, and retries automatically.
+
+For an existing installation, press **C** on the computer and select zero vaults.
+Selecting vaults again restores the regular vault dashboard.
+
 ## Computer control panel
 
 With the external monitor selected, the computer terminal shows configuration
@@ -62,7 +78,7 @@ On the monitor, tap **Show changes** or **Show summary** in the bottom row to
 switch views. Tap **[<]** or **[>]** at the bottom corners for the previous or next
 page; unavailable directions are dimmed. Tap the **[1m]** or **[5m]** column header
 to sort that window. Tapping the selected header again reverses the order:
-**v** means largest gains first, **^** means largest losses first. Both views have
+**v** means largest gains first, **^** means largest losses first. Both views (and history-only mode) have
 these controls and retain their own page and sort selection while running.
 Changing the sort returns that view to page one. Refreshes keep the selected
 page, clamping it if the list gets shorter; pages no longer rotate automatically.

@@ -306,3 +306,38 @@ for _,dims in ipairs({{29,12},{51,19}}) do
     end
 end
 print('Manual page bounds, signed column sorting and touch geometry passed')
+
+-- Ticker-only networks require no generic inventory or vault capacity reads.
+local tickerReads=0
+local historyOnlyConfig={vaults={},ticker='network'}
+local function tickerOnly(name)
+    eq(name,'network')
+    return {stock=function() tickerReads=tickerReads+1; return {{name='iron',count=100}} end}
+end
+local network=m.sample(historyOnlyConfig,tickerOnly)
+assert(network.historyOnly); eq(network.network,100); eq(network.trendItems.iron,100); eq(tickerReads,1)
+local failed=m.sample(historyOnlyConfig,function() return nil end)
+assert(failed.historyOnly and failed.networkError); eq(failed.trendItems,nil)
+local historyTracker={}
+m.trend(historyTracker,network.trendItems,0)
+network.trend=m.trend(historyTracker,{iron=80,gold=20},30)
+network.trendSource='stock network'
+for _,dims in ipairs({{29,12},{51,19},{26,10}}) do
+    local target,lines=screen(dims[1],dims[2])
+    m.draw(target,network,nil,false)
+    local text=table.concat(lines,'\n')
+    assert(text:find('STOCK NETWORK HISTORY',1,true))
+    assert(text:find('Network: 100',1,true))
+    assert(not text:find('Vault max',1,true)); assert(not text:find('Non-vault:',1,true))
+    assert(not text:find('%% full')); assert(not text:find('Show summary',1,true))
+    assert(text:find('History only',1,true)); assert(text:find('[1m]',1,true))
+    m.draw(target,failed,nil,false)
+    assert(table.concat(lines,'\n'):find('Network: unavailable',1,true))
+end
+network.trend.changes={}
+for i=1,13 do network.trend.changes[i]={name='item_'..i,minute=i,five=i} end
+eq(m.listPages(29,12,false,network),3) -- uses full history layout even in default view
+local historyConsole,historyLines=screen(51,19)
+m.drawConsole(historyConsole,network,nil,historyOnlyConfig,'Ready')
+eq(historyLines[3],'Mode: network history'); eq(historyLines[5],'Network items: 100')
+print('History-only sampling, failures, layouts, paging and control-panel checks passed')

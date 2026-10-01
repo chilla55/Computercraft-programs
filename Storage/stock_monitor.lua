@@ -1,7 +1,7 @@
--- stock-monitor-version: 1.0.8
+-- stock-monitor-version: 1.0.9
 -- Create Stock Ticker + Item Vault dashboard for CC: Tweaked.
 -- Run stock_monitor --configure to choose peripherals again.
-local M = { version = "1.0.8" }
+local M = { version = "1.0.9" }
 
 local function number(value, label)
     assert(type(value) == "number" and value >= 0 and value < math.huge
@@ -230,7 +230,8 @@ end
 function M.sample(config, wrap, cache, progress)
     local result = { current = 0, capacity = 0, slots = 0, occupied = 0, vaultItems = {} }
     local seen = {}
-    assert(#config.vaults > 0, "No vaults configured; run --configure")
+    result.historyOnly = #config.vaults == 0
+    assert(not result.historyOnly or config.ticker, "Select a Stock Ticker for history-only mode")
     for _, name in ipairs(config.vaults) do
         assert(not seen[name], "Duplicate vault: " .. name)
         seen[name] = true
@@ -303,7 +304,7 @@ function M.loading(target, message)
     target.setTextColor(colors.white)
     target.clear()
     target.setCursorPos(1, 1)
-    target.write(("READING VAULT STORAGE"):sub(1, w))
+    target.write(("READING STORAGE"):sub(1, w))
     if h >= 3 then
         target.setCursorPos(1, 3)
         target.write(message:sub(1, w))
@@ -332,7 +333,7 @@ function M.listLayout(w, h, trendView)
 end
 
 function M.listPages(w, h, trendView, data)
-    local _, rows = M.listLayout(w, h, trendView)
+    local _, rows = M.listLayout(w, h, trendView or (data and data.historyOnly))
     local trend = data and data.trend
     if rows < 1 or not trend or not trend.changes then return 1 end
     return math.max(1, math.ceil(#trend.changes / rows))
@@ -374,6 +375,7 @@ function M.touchAction(w, h, x, y, trendView)
 end
 
 function M.draw(target, data, problem, trendView, listState)
+    trendView = trendView or (data and data.historyOnly)
     listState = listState or { page = data and data.trendPage or 0, sort = "five", descending = true }
     local w, h = target.getSize()
     target.setBackgroundColor(colors.black)
@@ -387,6 +389,10 @@ function M.draw(target, data, problem, trendView, listState)
     end
     local function viewButton()
         local x, y, label = M.viewButton(w, h, trendView)
+        if data and data.historyOnly then
+            label = "History only"
+            x = math.floor((w - #label) / 2) + 1
+        end
         local pages = M.listPages(w, h, trendView, data)
         listState.page = math.max(0, math.min(listState.page or 0, pages - 1))
         line(y, "[<]", listState.page > 0 and colors.cyan or colors.gray)
@@ -473,7 +479,13 @@ function M.draw(target, data, problem, trendView, listState)
         viewButton()
     end
     if trendView then
-        line(2, "Source: " .. (data.trendSource or "network"), colors.lightGray)
+        if data.historyOnly then
+            line(1, "STOCK NETWORK HISTORY", colors.cyan)
+            if data.historyError then line(2, "History save failed", colors.orange)
+            else line(2, "Network: " .. (data.network and M.format(data.network) or "unavailable")) end
+        else
+            line(2, "Source: " .. (data.trendSource or "network"), colors.lightGray)
+        end
         changes(3)
         return
     end
@@ -539,9 +551,11 @@ function M.drawConsole(target, data, problem, config, status, historyError)
         target.write(text:sub(1, w))
     end
     M.terminalHeading(target, "STORAGE CONTROL PANEL")
-    line(3, "Configured vaults: " .. #config.vaults)
+    line(3, #config.vaults == 0 and "Mode: network history" or ("Configured vaults: " .. #config.vaults))
     line(4, "Ticker: " .. (config.ticker or "none (vault totals)"))
-    if data then
+    if data and #config.vaults == 0 then
+        line(5, "Network items: " .. (data.network and M.format(data.network) or "unavailable"))
+    elseif data then
         line(5, "Vault items: " .. M.format(data.current) .. " / " .. M.format(data.capacity))
     elseif problem then
         line(5, "Storage unavailable; retrying", colors.orange)
@@ -554,7 +568,7 @@ function M.drawConsole(target, data, problem, config, status, historyError)
         line(y, message:sub((y - 8) * w + 1, (y - 7) * w), colors.lightGray)
     end
     line(h - 1, "C: configure vaults/display   U: check updates")
-    line(h, "N: monitor changes/summary    Q: quit")
+    line(h, #config.vaults == 0 and "Q: quit" or "N: monitor changes/summary    Q: quit")
 end
 
 local function discover()
@@ -589,26 +603,33 @@ end
 
 local function configure(path)
     local tickers, inventories, monitors = discover()
-    assert(#inventories > 0,
-        "No inventories found. Connect vaults with enabled wired modems first.")
+    assert(#inventories > 0 or #tickers > 0,
+        "Connect a Stock Ticker or vault inventory before configuring.")
     print("Stock monitor setup")
     print("Connect each physical vault ONCE to avoid counting it twice.")
     local config = { interval = 5, vaults = {} }
-    config.ticker = choose("Choose the network Stock Ticker:", tickers, true)
+    config.ticker = choose("Choose the network Stock Ticker:", tickers, #inventories > 0)
     config.monitor = choose("Choose the display:", monitors, true)
-    print("Choose ONLY the vaults belonging to this network:")
-    for i, name in ipairs(inventories) do print(i .. ": " .. name) end
-    print("Enter numbers separated by spaces (e.g. 1 2 3).")
-    while #config.vaults == 0 do
-        write("> ")
-        local selection, seen, valid = {}, {}, true
-        for token in read():gmatch("%S+") do
-            local name = inventories[tonumber(token) or 0]
-            if not name then valid = false; break end
-            if not seen[name] then selection[#selection + 1], seen[name] = name, true end
+    if #inventories == 0 then
+        print("No inventories connected: using network history only.")
+    else
+        print("Choose ONLY the vaults belonging to this network:")
+        for i, name in ipairs(inventories) do print(i .. ": " .. name) end
+        if config.ticker then print("0: No vaults (network history only)") end
+        print("Enter numbers separated by spaces (e.g. 1 2 3).")
+        while true do
+            write("> ")
+            local answer = read():match("^%s*(.-)%s*$")
+            if answer == "0" and config.ticker then break end
+            local selection, seen, valid = {}, {}, true
+            for token in answer:gmatch("%S+") do
+                local name = inventories[tonumber(token) or 0]
+                if not name then valid = false; break end
+                if not seen[name] then selection[#selection + 1], seen[name] = name, true end
+            end
+            if valid and #selection > 0 then config.vaults = selection; break end
+            print(config.ticker and "Enter vault numbers, or 0 for history only." or "Enter valid vault numbers; history only requires a ticker.")
         end
-        if valid then config.vaults = selection end
-        if #config.vaults == 0 then print("Enter valid vault numbers.") end
     end
     -- Save selections immediately. The dashboard owns the first scan and
     -- reports progress/errors; setup must not silently scan everything twice.
@@ -647,6 +668,7 @@ function M.main(args, services)
         "Invalid configuration; run --configure")
     assert(type(config.interval) == "number" and config.interval >= 1
         and config.interval < math.huge, "Refresh interval must be at least 1 second")
+    assert(#config.vaults > 0 or config.ticker, "History-only mode requires a Stock Ticker; run --configure")
     services.configuring = false
     os.queueEvent("stock_monitor_configured")
     local terminal = term.current()
@@ -657,7 +679,9 @@ function M.main(args, services)
         summary = { page = 0, sort = "five", descending = true },
         changes = { page = 0, sort = "five", descending = true },
     }
-    local function listState() return listStates[trendView and "changes" or "summary"] end
+    local function listState()
+        return listStates[(trendView or #config.vaults == 0) and "changes" or "summary"]
+    end
     local capacityCache = {}
     local lastData, lastProblem, displayError
     local scanStatus = "Starting first scan..."
@@ -728,7 +752,8 @@ function M.main(args, services)
                 if event == "monitor_touch" and name == config.monitor
                     and lastData and not lastProblem and target then
                     local sized, w, h = pcall(target.getSize)
-                    local action = sized and M.touchAction(w, h, x, y, trendView)
+                    local action = sized and M.touchAction(w, h, x, y, trendView or lastData.historyOnly)
+                    if lastData.historyOnly and action == "view" then action = nil end
                     if action then
                         if action == "view" then trendView = not trendView
                         else M.listAction(listState(), action, M.listPages(w, h, trendView, lastData)) end
@@ -753,10 +778,10 @@ function M.main(args, services)
                 end
             else
                 draw(terminal)
-                M.terminalHeading(terminal, "VAULT STORAGE")
+                M.terminalHeading(terminal, #config.vaults == 0 and "STOCK HISTORY" or "VAULT STORAGE")
                 local w, h = terminal.getSize()
                 terminal.setCursorPos(1, h)
-                terminal.write(("C: setup U: update N: view Q: quit"):sub(1, w))
+                terminal.write((#config.vaults == 0 and "C: setup U: update Q: quit" or "C: setup U: update N: view Q: quit"):sub(1, w))
             end
         end
         render()
@@ -768,7 +793,7 @@ function M.main(args, services)
                 if key == "u" then
                     if services.requestUpdate then services.requestUpdate()
                     else services.updateStatus = "Updates require the launcher: storage/start.lua --run" end
-                elseif key == "n" then
+                elseif key == "n" and #config.vaults > 0 then
                     trendView = not trendView; notify()
                 elseif key == "c" then
                     services.configuring = true
