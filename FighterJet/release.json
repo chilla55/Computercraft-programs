@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "version": "fighter-0.1.7",
-  "ref": "fighter-0.1.7",
+  "version": "fighter-0.1.8",
+  "ref": "fighter-0.1.8",
   "files": {
     "flight.lua": {
-      "size": 19132,
-      "sha256": "ae9300ead03a840aa4986edebe0163199fb181f3ae52f7b70fc5e22d033e2907"
+      "size": 21222,
+      "sha256": "92b3c0ef6e809c5fdefedb0425ac84cf5c64fb642d920085bad7dac92e084057"
     },
     "flight_core.lua": {
       "size": 14338,

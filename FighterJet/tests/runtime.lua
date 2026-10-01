@@ -4,7 +4,7 @@ local function run(mode,angle)
     local clock,latest,commandSent,reboots,writes=0,nil,false,{},{}
     local terminated=false
     local config=dofile('FighterJet/jet_config.lua')
-    local assisting=mode=='assist' or mode=='assist_switch'
+    local assisting=mode=='assist' or mode=='assist_switch' or mode=='assist_read_failure'
     local commissioning=mode=='commission' or mode=='thruster'
     local tuning=commissioning or assisting
     config.flight.calibrated=not tuning; config.flight.thrustersVerified=not tuning
@@ -67,6 +67,10 @@ local function run(mode,angle)
             if (mode=='override' or mode=='setter_failure') and clock>2 and clock<2.5 then return {68} end
             if clock>0.5 and clock<0.8 then return {32} end
             return {}
+        end
+        if method=='getStatus' then
+            if mode=='assist_read_failure' then error('engine diagnostics unavailable') end
+            return {throttle=throttle[name],realThrust=throttle[name]*100,active=throttle[name]>0,fuel=500}
         end
         if method=='getHeight' then return 100 end
         if method=='getPosition' then return {x=clock*10,y=100,z=0,space='world',dimension='minecraft:overworld'} end
@@ -171,14 +175,17 @@ local function run(mode,angle)
             if w[2]=='setOutputs' and (w[3] or w[4]) then corrected=true end
         end
         assert(corrected,'No active wing correction without pilot keys')
-        assert(fakeFiles['FighterJet/assist.csv']:find('rightMeasured,rightAge,leftMeasured,leftAge',1,true))
+        local trace=fakeFiles['FighterJet/assist.csv']
+        assert(trace:find('rightMeasured,rightAge,leftMeasured,leftAge',1,true))
+        assert(trace:find('space,shift,requestedThrottle,thruster_12_reportedThrottle,thruster_12_realThrust',1,true))
+        if mode~='assist_read_failure' then assert(trace:find('100.000,1,500.000',1,true),'Missing real engine feedback') end
         assert(not latest.fault,'Assisted runtime fault: '..tostring(latest.fault))
     elseif mode=='sensor_failure' then assert(latest.fault and latest.fault:find('gimbal detached',1,true))
     elseif mode=='setter_failure' then assert(latest.fault and latest.fault:find('gear failed after write',1,true))
     elseif mode=='override' then assert(latest.mode=='MANUAL','Pilot did not override AP')
     else assert(latest.mode=='HOLD','HUD failure changed flight mode') end
 end
-for _,mode in ipairs({'preview','live','override','sensor_failure','setter_failure','commission','thruster','assist','assist_switch'}) do run(mode) end
+for _,mode in ipairs({'preview','live','override','sensor_failure','setter_failure','commission','thruster','assist','assist_switch','assist_read_failure'}) do run(mode) end
 run('commission','40')
 run('commission','0')
 print,os.clock,os.epoch,os.getComputerID=realPrint,realClock,realEpoch,realID

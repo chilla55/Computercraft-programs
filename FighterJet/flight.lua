@@ -39,6 +39,7 @@ local state=core.new(c.flight,store.load(statePath))
 if commissioning then state.mode=mode=='thruster' and 'THRUSTER TEST' or 'DIRECT TEST' end
 local pulse={selected=1}
 local report,reportBytes,reportAt=nil,0,0
+local reportInput,engineReadings=nil,{}
 local boot=tostring(os.epoch('utc'))..':'..tostring(math.random(1,2147483647))
 local server=link.server(boot)
 local desired={left=0,right=0,throttle=0}
@@ -53,6 +54,26 @@ local function optional(n,m)
     local ok,v=pcall(call,n,m)
     if not ok and v=='Terminated' then error(v,0) end
     return ok and v or nil
+end
+-- Diagnostic reads run independently; failures never interrupt actuator refresh.
+local function engineTelemetry()
+    while true do
+        if assisting then
+            local jobs={}
+            for _,name in ipairs(c.thrusters) do
+                local n=name
+                jobs[#jobs+1]=function()
+                    local reading=optional(n,'getStatus')
+                    engineReadings[n]={at=os.clock(),status=type(reading)=='table' and reading or nil}
+                end
+            end
+            parallel.waitForAll(table.unpack(jobs))
+        end
+        sleep(0.5)
+    end
+end
+local function traceNumber(v)
+    return core.finite(v) and string.format('%.3f',v) or ''
 end
 local function cycleSleep(t,period) sleep(math.max(0,period-(os.clock()-t))) end
 local function stopOutputs()
@@ -204,7 +225,8 @@ local function control()
                 state.throttle=desired.throttle
             else desired=core.step(state,sample,input,dt,c.flight) end
         end
-        if recording and report and now-reportAt>=0.25 then
+        local inputSignature=table.concat({input.pitch,input.bank,input.on and 1 or 0,input.off and 1 or 0,desired.pitchControl or '',state.direct and 1 or 0},':')
+        if recording and report and (now-reportAt>=0.25 or (assisting and inputSignature~=reportInput)) then
             local p=sample.position or {}
             local line=table.concat({string.format('%.2f',now-started),raw[1],raw[2],input.pitch,input.bank,
                 desired.left,desired.right,state.appliedThrottle or 0,mode=='thruster' and pulse.selected or 0,
@@ -218,9 +240,19 @@ local function control()
                     line=line..','..tostring(wing.measured)..','..tostring(wing.measuredAt and now-wing.measuredAt)
                 end
             end
+            if assisting then
+                line=line..','..(input.on and 1 or 0)..','..(input.off and 1 or 0)..','..tostring(desired.throttle)
+                for _,name in ipairs(c.thrusters) do
+                    local reading=engineReadings[name]
+                    local status=reading and reading.status or {}
+                    line=line..','..traceNumber(status.throttle)..','..traceNumber(status.realThrust)..','..
+                        (type(status.active)=='boolean' and (status.active and '1' or '0') or '')..','..
+                        traceNumber(status.fuel)..','..traceNumber(reading and now-reading.at)
+                end
+            end
             local logged,err=pcall(function()
                 assert(reportBytes+#line+1<=131072,'Trace reached 128 KiB')
-                report.writeLine(line); report.flush(); reportBytes=reportBytes+#line+1; reportAt=now
+                report.writeLine(line); report.flush(); reportBytes=reportBytes+#line+1; reportAt=now; reportInput=inputSignature
             end)
             if not logged then
                 pcall(report.close); report=nil; state.warning='TRACE STOPPED: '..tostring(err)
@@ -246,6 +278,14 @@ local function flightTask()
                 local ok,file=pcall(fs.open,fs.combine(paths.root(dir),assisting and 'assist.csv' or 'commission.csv'),'w')
                 if ok and file then
                     local header='seconds,gx,gz,commonKey,differentialKey,leftSurface,rightSurface,throttle,thrusterIndex,altitude,x,y,z,'..table.concat(c.thrusters,',')..(assisting and ',controlMode,pitchControl,pitch,bank,targetPitch,targetBank,pitchRate,bankRate,rightMeasured,rightAge,leftMeasured,leftAge' or '')
+                    if assisting then
+                        header=header..',space,shift,requestedThrottle'
+                        for _,name in ipairs(c.thrusters) do
+                            for _,field in ipairs({'reportedThrottle','realThrust','active','fuel','readAge'}) do
+                                header=header..','..name..'_'..field
+                            end
+                        end
+                    end
                     local written=pcall(function()
                         file.writeLine(header)
                         file.flush()
@@ -327,7 +367,7 @@ local function screen()
     end
 end
 print('Starting fighter '..mode)
-local ok,err=pcall(function() parallel.waitForAny(flightTask,network,statusSender,recovery,screen) end)
+local ok,err=pcall(function() parallel.waitForAny(flightTask,network,statusSender,recovery,screen,engineTelemetry) end)
 local failures=stopOutputs()
 if report then pcall(report.close) end
 if #failures>0 then print('Cleanup failed: '..table.concat(failures,'; ')) end

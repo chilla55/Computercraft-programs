@@ -39,6 +39,34 @@ Startup selection follows the default described above. Defaults for a new releas
 available inside `/fighter/releases/fighter-X.Y.Z/` for comparison; new
 configuration fields are not silently merged into your calibrated settings.
 
+## Engine-output diagnostics (0.1.8)
+
+The 0.1.7 trace confirmed powered wing/pitch separation but still showed a full
+backward loop while the controller commanded a top/bottom thrust differential.
+This release adds evidence needed to distinguish applied-engine-output problems
+from physical torque/authority and feedback-direction problems. It makes no gain,
+control-sign, or allocation changes.
+
+The assisted trace now includes, for each configured engine:
+
+- `reportedThrottle`, `realThrust`, `active`, `fuel`, and `readAge` from the
+  peripheral's `getStatus()` result, read independently every 0.5 seconds.
+- Missing/failed values are empty fields, never fabricated zero thrust. Sample age
+  distinguishes a recent read from a delayed one. `realThrust` is the API's physics
+  thrust value; the log does not assume a particular unit or linear throttle curve.
+
+`space`, `shift`, and `requestedThrottle` distinguish pilot throttle changes from
+last-written engine outputs. Key/allocation changes trigger a trace row at the next
+control sample, in addition to the normal 0.25-second trace interval. Events shorter
+than the control polling interval can still be missed.
+
+These reads run in a separate cooperative task. Read errors or missing telemetry
+cannot trip the flight actuator fault handler. Existing bounded logging and cleanup
+remain intact. `/fighter/assist.csv` is still overwritten each run and capped at
+128 KiB; the extra fields shorten its duration, so keep the diagnostic run brief.
+A short initial powered segment is sufficient to compare commanded and reported
+outputs; another complete loop is not needed. Stability is not yet validated.
+
 ## Separate powered pitch and roll (0.1.7)
 
 In default assisted flight and confirmed direct manual control:
