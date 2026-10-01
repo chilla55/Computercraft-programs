@@ -23,10 +23,11 @@ return {
     flightPeer = "right", hudPeer = "left",
     linkTimeout = 3, requestMaxAge = 2,
     recovery = { autoRestartHUD=true, grace=30, timeout=10, cooldown=60, maxAttempts=3 },
-    -- Optional overrides for explicit /fighter/run assist; existing configs need no edits.
-    -- Defaults in flight_core.assistConfig use pitch=+GZ, bank=-GX, 40-degree surfaces.
+    -- Optional overrides for default assisted control; existing configs need no edits.
+    -- Defaults use bank-corrected +GZ pitch, -GX bank and 40-degree surfaces.
     assist = { pitchRateLimit=25, bankRateLimit=40, pitchKp=0.6, bankKp=0.6,
-        pitchKd=0.5, bankKd=0.4, rateFilter=0.15 },
+        pitchKd=0.5, bankKd=0.4, rateFilter=0.15,
+        pitchEnvelope=35, bankEnvelope=55, envelopeKp=2, thrustAuthority=0.6 },
     flight = {
         -- Set true only after checking these axes/signs and all four thrust directions.
         calibrated=false, thrustersVerified=false,

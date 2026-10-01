@@ -14,7 +14,15 @@ function M.attitude(a, c)
     assert(type(a) == 'table', 'Missing gimbal angles')
     local p, b = a[c.pitchAxis], a[c.bankAxis]
     assert(M.finite(p) and M.finite(b), 'Invalid gimbal angles')
-    return M.wrap((p-c.pitchOffset)*c.pitchSign), M.wrap((b-c.bankOffset)*c.bankSign)
+    p=M.wrap((p-c.pitchOffset)*c.pitchSign)
+    b=M.wrap((b-c.bankOffset)*c.bankSign)
+    if c.projectedPitch then
+        -- Simulated reports atan2(down.x,-down.y), not Euler pitch.
+        -- Remove the roll projection: pitch = atan2(forwardDown, transverseLength).
+        local pr,br=math.rad(p),math.rad(b)
+        p=math.deg(math.atan2(math.sin(pr)*math.abs(math.cos(br)),math.abs(math.cos(pr))))
+    end
+    return p,b
 end
 -- Explicit tuning mode: observed upright signs, independent of saved calibration flags.
 -- This profile does not certify the aircraft or enable navigation/autopilot.
@@ -23,7 +31,8 @@ function M.assistConfig(base, custom)
     local defaults={pitchAxis=2,bankAxis=1,pitchSign=1,bankSign=-1,
         pitchOffset=0,bankOffset=0,pitchSurfaceSign=1,bankSurfaceSign=-1,
         maxSurface=40,pitchKp=0.6,bankKp=0.6,pitchKd=0.5,bankKd=0.4,
-        pitchRateLimit=25,bankRateLimit=40,rateFilter=0.15}
+        pitchRateLimit=25,bankRateLimit=40,rateFilter=0.15,
+        pitchEnvelope=35,bankEnvelope=55,envelopeKp=2,thrustAuthority=0.6}
     assert(custom==nil or type(custom)=='table','Invalid assist profile')
     for k,v in pairs(defaults) do c[k]=custom and custom[k] or v end
     for k in pairs(defaults) do assert(M.finite(c[k]),'Invalid assist '..k) end
@@ -33,6 +42,10 @@ function M.assistConfig(base, custom)
     for _,k in ipairs({'pitchRateLimit','bankRateLimit'}) do
         assert(c[k]>0 and c[k]<=90,'Invalid assist '..k)
     end
+    assert(c.pitchEnvelope>0 and c.pitchEnvelope<85 and c.bankEnvelope>0 and c.bankEnvelope<85,'Invalid assist envelope')
+    assert(c.envelopeKp>0 and c.envelopeKp<=10,'Invalid envelope gain')
+    assert(c.thrustAuthority>=0 and c.thrustAuthority<=1,'Invalid assist thrust authority')
+    c.projectedPitch=true
     c.rateControl=true
     return c
 end
@@ -195,6 +208,10 @@ function M.step(s, a, input, dt, c)
             else s.bank=0 end
         end
     end
+    if c.rateControl then
+        s.pitch=M.clamp(s.pitch,-c.pitchEnvelope,c.pitchEnvelope)
+        s.bank=M.clamp(s.bank,-c.bankEnvelope,c.bankEnvelope)
+    end
     s.pitchHeld=input.pitch~=0; s.bankHeld=input.bank~=0
     local pr=s.lastPitch and M.wrap(a.pitch-s.lastPitch)/dt or 0
     local br=s.lastBank and M.wrap(a.bank-s.lastBank)/dt or 0
@@ -205,11 +222,25 @@ function M.step(s, a, input, dt, c)
     local pitchEffort=c.pitchKp*M.wrap(s.pitch-a.pitch)-c.pitchKd*s.pitchRate
     local bankEffort=c.bankKp*M.wrap(s.bank-a.bank)-c.bankKd*s.bankRate
     if c.rateControl and s.mode=='MANUAL' then
-        if input.pitch~=0 then pitchEffort=c.pitchKd*(input.pitch*c.pitchRateLimit-s.pitchRate) end
-        if input.bank~=0 then bankEffort=c.bankKd*(input.bank*c.bankRateLimit-s.bankRate) end
+        local function rateDemand(value,key,limit,rate)
+            local demand=key*rate
+            -- Approach the boundary with a shrinking outward rate allowance.
+            -- Outside it, request an inward rate even if the pilot holds outward.
+            return M.clamp(demand,
+                M.clamp((-limit-value)*c.envelopeKp,-rate,rate),
+                M.clamp((limit-value)*c.envelopeKp,-rate,rate))
+        end
+        if input.pitch~=0 then pitchEffort=c.pitchKd*(rateDemand(a.pitch,input.pitch,c.pitchEnvelope,c.pitchRateLimit)-s.pitchRate) end
+        if input.bank~=0 then bankEffort=c.bankKd*(rateDemand(a.bank,input.bank,c.bankEnvelope,c.bankRateLimit)-s.bankRate) end
     end
     local common=pitchEffort*c.pitchSurfaceSign
     local differential=bankEffort*c.bankSurfaceSign
+    if c.rateControl then
+        -- Preserve collective pitch authority when roll saturates the shared surfaces.
+        common=M.clamp(common,-c.maxSurface,c.maxSurface)
+        local remaining=c.maxSurface-math.abs(common)
+        differential=M.clamp(differential,-remaining,remaining)
+    end
     local left,right=common+differential,common-differential
     local scale=math.max(1,math.abs(left)/c.maxSurface,math.abs(right)/c.maxSurface)
     local function round(v) return math.floor(math.abs(v)/scale+0.5)*(v<0 and -1 or 1) end

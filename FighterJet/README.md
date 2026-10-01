@@ -39,6 +39,33 @@ Startup selection follows the default described above. Defaults for a new releas
 available inside `/fighter/releases/fighter-X.Y.Z/` for comparison; new
 configuration fields are not silently merged into your calibrated settings.
 
+## Stabilization corrections (0.1.6)
+
+The first assisted trace showed nose-up motion despite nose-down requests, followed
+by coupled pitch/bank oscillations and an inverted bank target captured on release.
+This release changes assisted control as follows:
+
+- Interpret the gimbal's projected pitch using its bank reading. The sensor supplies
+  `atan2(localDown.x, -localDown.y)`, not independent Euler pitch; see the
+  [Simulated sensor source](https://raw.githubusercontent.com/Creators-of-Aeronautics/Simulated-Project/main/simulated/common/src/main/java/dev/simulated_team/simulated/content/blocks/gimbal_sensor/GimbalSensorBlockEntity.java).
+- Bound captured attitude targets to **±35° pitch / ±55° bank**. Held keys request
+  progressively less outward rotation near the boundary, and inward rotation
+  outside it. These are control objectives, not guaranteed physical limits.
+- Preserve common pitch correction when combined pitch/roll demands saturate wing
+  travel. Roll receives the remaining travel instead of scaling pitch down with it.
+- Allow up to **60% reduction** of one pitch engine during assisted corrections,
+  compared with the previous 25% maximum. `assist.thrustAuthority` controls this;
+  it respects disabled vectoring and keeps configured engine mappings/signs.
+  Direct manual and commissioning retain their existing vectoring settings.
+
+Existing installations receive these defaults without editing their configuration.
+Explicit `assist` overrides remain respected. The new tunable fields are
+`pitchEnvelope`, `bankEnvelope`, `envelopeKp`, and `thrustAuthority`.
+Default assistance, confirmed direct-manual selection, throttle behavior, and
+independent flight operation during HUD loss remain as described below.
+Host tests include projected-angle reconstruction and a regression for the logged
+mixer saturation, but real aerodynamic response still requires the next flight trace.
+
 ## Default active stabilization and manual selector (0.1.5)
 
 Stop both programs while parked, then run `/fighter/update apply` on both computers.
@@ -54,12 +81,12 @@ remap. It leaves saved calibration flags unchanged. The terminal says
 
 - W/S request pitch rotation, up to 25 degrees/second; A/D request bank rotation,
   up to 40 degrees/second. These are controller requests, not guaranteed limits.
-- Releasing either axis captures its current attitude. Feedback opposes further
+- Releasing either axis captures its current attitude within the assisted envelope. Feedback opposes further
   rotation and returns toward that captured angle. It does not automatically level
   the plane or hold altitude.
 - Wings mix pitch and roll continuously, with up to 40 degrees of deflection.
   Space latches full base thrust; Shift turns all engines off. Pitch feedback also
-  modulates top/bottom thrust using the configured authority (default 25%). Bank
+  modulates top/bottom thrust using assisted thrust authority (default 60%). Bank
   control uses the wings; this mode adds no open-loop differential yaw thrust.
 - HUD loss does not stop assistance. Computer 5 retains its output watchdogs and
   may restart computer 6 under the existing recovery policy. Autopilot/configuration
@@ -79,14 +106,15 @@ On the HUD **Flight Data** page (one PAGE press from the horizon):
 - Link loss preserves the selected mode. Restarting computer 5 always returns to
   assisted control with thrust off. The selected direct mode is not persisted.
 
-The provisional profile uses pitch **+GZ**, bank **-GX**, based on the pilot's
+The provisional profile derives pitch from **+GZ and GX**, with bank **-GX**, based on the pilot's
 observations and commissioning traces. It overrides the old saved axis/gain values
 in memory only. Optional `assist = {...}` overrides in `/fighter/jet_config.lua`
-allow tuning `pitchKp`, `pitchKd`, `bankKp`, `bankKd`, `pitchRateLimit`,
+allow tuning the envelope/thrust fields above and `pitchKp`, `pitchKd`, `bankKp`, `bankKd`, `pitchRateLimit`,
 `bankRateLimit`, `rateFilter`, `maxSurface`, axis indices, signs and offsets.
 The HUD uses the active profile supplied by computer 5 with its direct gimbal read.
 These gains are tested in software, not yet verified in flight. The two tilt
-readings are coupled at extreme attitudes; this is not validated inverted-flight
+readings do not provide heading or full angular velocity, and bank becomes ambiguous
+near a vertical nose; this is not validated inverted-flight
 recovery. Begin upright and use small inputs for the first assisted trace.
 
 `/fighter/assist.csv` is overwritten each assisted run and capped at 128 KiB.

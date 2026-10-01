@@ -16,6 +16,8 @@ local function module(n) return paths.module(dir,n) end
 local c,core,link,store,hw=module('jet_config'),module('flight_core'),module('jet_link'),module('jet_store'),module('hardware')
 if assisting then c.flight=core.assistConfig(c.flight,c.assist) end
 local vectoring=core.vectorConfig(c.vectoring)
+local assistedVectoring=core.vectorConfig(c.vectoring)
+if assisting then assistedVectoring.authority=c.flight.thrustAuthority end
 -- Validate the mapping before touching hardware. Individual thruster tests bypass the mixer.
 if mode~='thruster' then core.thrustMix(c.thrusters,1,0,0,vectoring) end
 assert(os.getComputerID()==c.flightID,'Run flight on computer '..c.flightID)
@@ -117,7 +119,7 @@ local function thrust()
             target={}
             for index,name in ipairs(c.thrusters) do target[name]=index==pulse.selected and base or 0 end
         else
-            target=core.thrustMix(c.thrusters,base,desired.pitchAssist or 0,desired.yawAssist or 0,vectoring)
+            target=core.thrustMix(c.thrusters,base,desired.pitchAssist or 0,desired.yawAssist or 0,assisting and not state.direct and assistedVectoring or vectoring)
         end
         local jobs={}
         for _,name in ipairs(c.thrusters) do
@@ -282,7 +284,7 @@ local function statusSender()
             distance=state.distance,course=sample and sample.course,throttle=state.throttle,
             surfaces=desired,warning=state.warning,ack=ack,restarts=watchdog.attempts,
             assist=assisting and {profile=c.flight,enabled=not state.direct} or nil,calibrated=c.flight.calibrated,engineOutputs=state.appliedThrottles,
-            vectoring=mode~='thruster' and {enabled=vectoring.enabled,authority=vectoring.authority} or nil,commission=commissioning and {kind=mode,degrees=degrees,
+            vectoring=mode~='thruster' and {enabled=vectoring.enabled,authority=assisting and not state.direct and assistedVectoring.authority or vectoring.authority} or nil,commission=commissioning and {kind=mode,degrees=degrees,
                 thruster=c.thrusters[pulse.selected],throttle=state.appliedThrottle or 0,raw=sample and sample.raw} or nil}
         pcall(rednet.send,c.hudID,m,link.protocol)
         sleep(0.5)

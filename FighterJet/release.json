@@ -1,23 +1,23 @@
 {
   "schema": 1,
-  "version": "fighter-0.1.5",
-  "ref": "fighter-0.1.5",
+  "version": "fighter-0.1.6",
+  "ref": "fighter-0.1.6",
   "files": {
     "flight.lua": {
-      "size": 18753,
-      "sha256": "a5aacf879be1030c93e8b29f642dee1a9637198185ece2d77bb49658aa751cfc"
+      "size": 19005,
+      "sha256": "f74601aa835ac27e8d7f763425b7453ee9fdefe4b84b31893ea5d506e0839329"
     },
     "flight_core.lua": {
-      "size": 12276,
-      "sha256": "f6677edd6ddff9d466e801f01272f311943293a822ae8b9c33707aaa497c5446"
+      "size": 13961,
+      "sha256": "7ab4caf093f14b116a4d797bd1de33e0b97b18787c364d3db6314412aa77cc52"
     },
     "hardware.lua": {
       "size": 1359,
       "sha256": "616518ce96d7bf2bc8691685a558f94b3047f18908bb9c561fd66d8e6f892774"
     },
     "jet_config.lua": {
-      "size": 2643,
-      "sha256": "b87bd8de5bebfaaac9614510398a1ed1f3e65540c846ca4153e7c5b139049b30"
+      "size": 2707,
+      "sha256": "92eadbc96982fc0eb4a71564d06056cb77836b36b9ee62cdf1f0220436d2e7df"
     },
     "jet_link.lua": {
       "size": 1106,

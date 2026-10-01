@@ -136,7 +136,7 @@ print('Flight control, navigation, protocol, watchdog and cockpit tests passed')
 local ac=core.assistConfig(c)
 assert(ac.bankSign==-1 and c.bankSign==1 and ac.maxSurface==40)
 local pitch,bank=core.attitude({-12,7},ac)
-assert(pitch==7 and bank==12)
+assert(pitch>6.8 and pitch<7 and bank==12)
 local s=core.new(ac)
 core.step(s,sample(),none,0.1,ac)
 local out=core.step(s,sample(0,10),none,0.1,ac)
@@ -203,3 +203,29 @@ assert(not ui.touch(buttons,2,8,15,10,15),'Expired confirmation must need anothe
 assert(ui.touch(buttons,2,7,15,10,16).value=='ASSIST' and not buttons.manualUntil)
 assert(not core.new(ac).direct,'Reboot must never restore direct control')
 print('Manual confirmation, expiry, throttle preservation and assisted recapture passed')
+
+-- Reconstruct known gravity projections, including inverted banks.
+for _,p in ipairs({-80,-35,0,35,80}) do
+    for _,b in ipairs({-150,-55,0,55,150}) do
+        local pr,br=math.rad(p),math.rad(b)
+        local dx=math.sin(pr)
+        local dy=-math.cos(pr)*math.cos(br)
+        local dz=-math.cos(pr)*math.sin(br)
+        local raw={math.deg(math.atan2(dz,-dy)),math.deg(math.atan2(dx,-dy))}
+        local gotP,gotB=core.attitude(raw,ac)
+        assert(math.abs(gotP-p)<1e-8 and math.abs(core.wrap(gotB-b))<1e-8,'Projected tilt was treated as Euler pitch')
+    end
+end
+local envelope=core.new(ac)
+core.step(envelope,sample(70,-122),none,0.1,ac)
+assert(envelope.pitch==35 and envelope.bank==-55,'Must not capture inverted/outside-envelope targets')
+envelope=core.new(ac)
+local blocked=core.step(envelope,sample(50,70),core.input({83,68}),0.1,ac)
+assert(blocked.left+blocked.right<0,'Outward pitch input beyond limit must request recovery')
+assert(blocked.right-blocked.left<0,'Outward bank input beyond limit must request recovery')
+-- Log regression: the old scaled mixer diluted nose-down demand during a large bank error.
+envelope=core.new(ac); envelope.pitch=29.3; envelope.bank=0
+local mixed=core.step(envelope,sample(84,40),none,0.1,ac)
+assert((mixed.left+mixed.right)/2<=-32,'Roll saturation stole pitch correction')
+assert(math.abs(mixed.left)<=40 and math.abs(mixed.right)<=40)
+print('Gravity projection, assisted envelope and pitch-priority mixing passed')
