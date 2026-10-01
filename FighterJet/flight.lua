@@ -1,6 +1,6 @@
--- Computer 5: flight and autopilot owner. Usage: flight [preview|live]
+-- Computer 5: flight and autopilot owner. Default: assisted control.
 local args={...}
-local mode=args[1] or 'preview'
+local mode=args[1] or 'assist'
 assert(#args<=2 and (mode=='preview' or mode=='live' or mode=='assist' or mode=='commission' or mode=='thruster'),
     'Usage: flight [preview|live|assist|commission [degrees]|thruster]')
 assert(not args[2] or mode=='commission','Only commission accepts a surface angle')
@@ -175,7 +175,9 @@ local function control()
         if pending then
             local request=pending; pending=nil
             local accepted,reason=link.accept(server,request,state.revision,now,c.requestMaxAge)
-            if commissioning or assisting then accepted=false; reason='Flight tuning: autopilot/config requests disabled' end
+            if commissioning or (assisting and (type(request.command)~='table' or request.command.action~='control')) then
+                accepted=false; reason='Flight tuning: autopilot/config requests disabled'
+            end
             if accepted and (input.any or not ready) then accepted=false; reason='Pilot input active' end
             if accepted then
                 local oldHome,oldAlt,oldRevision=state.home,state.altitude,state.revision
@@ -204,6 +206,7 @@ local function control()
                 tostring(altitude),tostring(p.x),tostring(p.y),tostring(p.z)},',')
             for _,name in ipairs(c.thrusters) do line=line..','..tostring(state.appliedThrottles and state.appliedThrottles[name] or 0) end
             if assisting then
+                line=line..','..(state.direct and 'DIRECT' or 'ASSIST')
                 for _,value in ipairs({sample.pitch,sample.bank,state.pitch or 0,state.bank or 0,
                     state.pitchRate or 0,state.bankRate or 0}) do line=line..','..tostring(value) end
                 for _,wing in ipairs(wings) do
@@ -237,7 +240,7 @@ local function flightTask()
             if recording then
                 local ok,file=pcall(fs.open,fs.combine(paths.root(dir),assisting and 'assist.csv' or 'commission.csv'),'w')
                 if ok and file then
-                    local header='seconds,gx,gz,commonKey,differentialKey,leftSurface,rightSurface,throttle,thrusterIndex,altitude,x,y,z,'..table.concat(c.thrusters,',')..(assisting and ',pitch,bank,targetPitch,targetBank,pitchRate,bankRate,rightMeasured,rightAge,leftMeasured,leftAge' or '')
+                    local header='seconds,gx,gz,commonKey,differentialKey,leftSurface,rightSurface,throttle,thrusterIndex,altitude,x,y,z,'..table.concat(c.thrusters,',')..(assisting and ',controlMode,pitch,bank,targetPitch,targetBank,pitchRate,bankRate,rightMeasured,rightAge,leftMeasured,leftAge' or '')
                     local written=pcall(function()
                         file.writeLine(header)
                         file.flush()
@@ -273,12 +276,12 @@ local function statusSender()
     while true do
         local now=os.clock()
         local m={kind='status',boot=boot,ticket=link.ticket(server,now),revision=state.revision,
-            nextSequence=server.lastCommand+1,mode=state.mode,live=live,ready=ready,fault=fault,
+            nextSequence=server.lastCommand+1,mode=assisting and (state.direct and 'DIRECT MANUAL' or 'ASSIST') or state.mode,live=live,ready=ready,fault=fault,
             cycle=cycles,healthy=ready and not fault and lastCycle~=nil and now-lastCycle<c.flight.outputTimeout,
             targetPitch=state.pitch,targetBank=state.bank,altitude=state.altitude,home=state.home,
             distance=state.distance,course=sample and sample.course,throttle=state.throttle,
             surfaces=desired,warning=state.warning,ack=ack,restarts=watchdog.attempts,
-            assist=assisting and {profile=c.flight} or nil,calibrated=c.flight.calibrated,engineOutputs=state.appliedThrottles,
+            assist=assisting and {profile=c.flight,enabled=not state.direct} or nil,calibrated=c.flight.calibrated,engineOutputs=state.appliedThrottles,
             vectoring=mode~='thruster' and {enabled=vectoring.enabled,authority=vectoring.authority} or nil,commission=commissioning and {kind=mode,degrees=degrees,
                 thruster=c.thrusters[pulse.selected],throttle=state.appliedThrottle or 0,raw=sample and sample.raw} or nil}
         pcall(rednet.send,c.hudID,m,link.protocol)
@@ -301,7 +304,7 @@ local function screen()
     while true do
         term.setCursorPos(1,1); term.clear()
         print('FIGHTER '..(assisting and 'ASSIST - TUNING' or commissioning and state.mode or (live and 'LIVE' or 'PREVIEW - NO ACTUATOR WRITES')))
-        print(fault and ('FAULT: '..fault) or (ready and state.mode or 'Release flight keys first'))
+        print(fault and ('FAULT: '..fault) or (ready and (assisting and (state.direct and 'DIRECT MANUAL - NO STABILIZATION' or 'ASSIST') or state.mode) or 'Release flight keys first'))
         if sample then
             if commissioning then print(string.format('RAW GX %.2f GZ %.2f',sample.raw[1],sample.raw[2]))
             else print(string.format('Pitch %.1f Bank %.1f',sample.pitch,sample.bank)) end
@@ -309,7 +312,9 @@ local function screen()
         print(string.format('Surfaces L %d R %d Thrust %d',desired.left,desired.right,desired.throttle))
         if mode=='thruster' then print('W/S select: '..c.thrusters[pulse.selected]); print('Space: 0.3s pulse, release to rearm; Shift OFF')
         elseif mode=='commission' then print('W/S common A/D differential; NO STABILIZATION'); print('Thrust assist '..(vectoring.enabled and (vectoring.authority*100)..'%' or 'OFF')); print('Space FULL THRUST; Shift OFF; release wings = neutral')
-        elseif assisting then print('W/S pitch rate A/D bank rate; release = attitude hold'); print('Space ON Shift OFF; ASSIST trace enabled')
+        elseif assisting then
+            print(state.direct and 'Direct W/S pitch A/D bank; release = neutral' or 'W/S pitch rate A/D bank rate; release = attitude hold')
+            print('Space ON Shift OFF; flight trace enabled')
         else print('W/S pitch A/D bank Space ON Shift OFF') end
         print('HUD '..(lastHUD and os.clock()-lastHUD<c.linkTimeout and 'CONNECTED' or 'OFFLINE'))
         print('Ctrl+T stops this controller')

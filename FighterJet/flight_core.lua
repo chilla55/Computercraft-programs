@@ -120,7 +120,15 @@ function M.course(previous, current, dt, minimum)
 end
 function M.command(s, cmd, sample, c)
     if type(cmd) ~= 'table' then return false, 'Invalid command' end
-    if cmd.action == 'home' then
+    if cmd.action == 'control' then
+        if not c.rateControl then return false,'Control selector requires assisted flight runtime' end
+        if cmd.value~='ASSIST' and cmd.value~='DIRECT' then return false,'Unknown control selection' end
+        if cmd.value=='DIRECT' and cmd.confirmed~=true then return false,'Confirm direct manual control first' end
+        s.direct=cmd.value=='DIRECT'; s.mode='MANUAL'
+        s.pitch=sample.pitch; s.bank=sample.bank
+        s.lastPitch=sample.pitch; s.lastBank=sample.bank
+        s.pitchRate=0; s.bankRate=0; s.pitchHeld=false; s.bankHeld=false
+    elseif cmd.action == 'home' then
         local p = M.position(cmd.value or (cmd.source=='here' and sample.position or sample.marker))
         if not p or (sample.position and p.dimension and sample.position.dimension and p.dimension ~= sample.position.dimension) then
             return false, 'No valid home coordinates'
@@ -149,6 +157,11 @@ function M.command(s, cmd, sample, c)
 end
 function M.step(s, a, input, dt, c)
     assert(M.finite(a.pitch) and M.finite(a.bank), 'Invalid attitude')
+    if c.rateControl and s.direct then
+        local demand=M.direct(input,c.maxSurface,s.throttle)
+        s.throttle=demand.throttle
+        return demand
+    end
     dt=M.clamp(dt,0.01,0.5)
     if not s.pitch then s.pitch=a.pitch; s.bank=a.bank end
     if input.any and s.mode~='MANUAL' then

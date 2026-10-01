@@ -179,3 +179,27 @@ local rows=ui.render(display,render,core,config,15,10,{data={gimbal={-12,7}}},tr
 local text=''; for _,row in ipairs(rows) do text=text..row[1]..'\n' end
 assert(text:find('ASSIST TUNING',1,true),'HUD must show active assist despite saved calibration=false')
 assert(text:find('B12.0',1,true),'HUD must use active negative GX bank sign')
+
+-- Direct manual requires explicit confirmation, preserves throttle, and assistance
+-- recaptures attitude/derivatives without returning to the pre-manual target.
+local switch=core.new(ac); switch.throttle=1
+assert(not core.command(switch,{action='control',value='DIRECT'},sample(10,20),ac))
+assert(not switch.direct and switch.revision==0)
+assert(core.command(switch,{action='control',value='DIRECT',confirmed=true},sample(10,20),ac))
+local manual=core.step(switch,sample(15,30),core.input({68}),0.1,ac)
+assert(manual.left==-40 and manual.right==40 and manual.throttle==1)
+manual=core.step(switch,sample(25,45),none,0.1,ac)
+assert(manual.left==0 and manual.right==0 and switch.direct,'Release must keep selected direct mode')
+assert(core.command(switch,{action='control',value='ASSIST'},sample(25,45),ac))
+assert(not switch.direct and switch.pitch==25 and switch.bank==45 and switch.throttle==1)
+local captured=core.step(switch,sample(25,45),none,0.1,ac)
+assert(captured.left==0 and captured.right==0,'Re-enable caused stale derivative/target kick')
+local buttons=ui.new(config); buttons.page=2
+assert(not ui.touch(buttons,2,8,15,10,1),'One tap must not disable assistance')
+local confirmed=ui.touch(buttons,2,8,15,10,2)
+assert(confirmed.action=='control' and confirmed.value=='DIRECT' and confirmed.confirmed)
+assert(not ui.touch(buttons,2,8,15,10,10))
+assert(not ui.touch(buttons,2,8,15,10,15),'Expired confirmation must need another tap')
+assert(ui.touch(buttons,2,7,15,10,16).value=='ASSIST' and not buttons.manualUntil)
+assert(not core.new(ac).direct,'Reboot must never restore direct control')
+print('Manual confirmation, expiry, throttle preservation and assisted recapture passed')

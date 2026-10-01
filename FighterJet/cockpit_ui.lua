@@ -4,17 +4,27 @@ function M.new(c) return {page=1,range=#c.ranges,filter=1,draftAltitude=c.flight
     home={x=0,y=90,z=0,dimension=c.homeDimension},coordinate=1,step=100} end
 function M.touch(ui,x,y,w,h,now)
     local page=M.pages[ui.page]
+    if page~='flight' or y~=8 then ui.manualUntil=nil end
     if y==h then
         if page~='radar' or x<=math.floor(w/3) then ui.page=ui.page%#M.pages+1; ui.rebootUntil=nil
         elseif x<=math.floor(2*w/3) then return {localAction='range'}
         else ui.filter=ui.filter%3+1 end
+    elseif page=='flight' then
+        if y==7 then return {action='control',value='ASSIST'} end
+        if y==8 then
+            if ui.manualUntil and now<=ui.manualUntil then
+                ui.manualUntil=nil
+                return {action='control',value='DIRECT',confirmed=true}
+            end
+            ui.manualUntil=now+4
+        end
     elseif page=='autopilot' then
         if y==3 then ui.draftAltitude=ui.draftAltitude+(x<=w/2 and -10 or 10)
         elseif y==4 then return {action='altitude',value=ui.draftAltitude}
         elseif y==5 then return {action='mode',value='HOLD'}
         elseif y==6 then return {action='mode',value='ALT'}
         elseif y==7 then return {action='mode',value='HOME'}
-        elseif y==8 then return {action='mode',value='MANUAL'} end
+        elseif y==8 then return {action='control',value='ASSIST'} end
     elseif page=='home' then
         if y>=3 and y<=5 then ui.coordinate=y-2
         elseif y==6 then
@@ -51,8 +61,8 @@ function M.render(ui,core,flightCore,c,w,h,packet,sensorsFresh,radar,radarFresh,
         f.text(1,4,'Vraw '..core.number(d.velocity,1))
         f.text(1,5,'T '..core.number(d.throttle and d.throttle*100)..'%')
         f.text(1,6,'COAL '..core.number(d.engineCoal)..'/'..core.number(d.reserveCoal))
-        f.text(1,7,'AP ALT '..core.number(status and status.altitude))
-        f.text(1,8,'ERR '..core.number(d.errorCount))
+        f.text(1,7,'ENABLE ASSIST','b')
+        f.text(1,8,ui.manualUntil and now<=ui.manualUntil and 'CONFIRM MANUAL' or 'DIRECT MANUAL','e')
     elseif page=='horizon' then
         local valid,pitch,bank=false,nil,nil
         local assist=linkFresh and status.assist
@@ -83,7 +93,7 @@ function M.render(ui,core,flightCore,c,w,h,packet,sensorsFresh,radar,radarFresh,
             end
             f.text(math.floor(cx)-1,math.floor(cy),'-+-','4')
             f.text(1,2,'P'..core.number(pitch,1)..' B'..core.number(bank,1))
-            if assist then f.text(1,h-2,'ASSIST TUNING','4') end
+            if assist then f.text(1,h-2,assist.enabled==false and 'NO STABILIZER' or 'ASSIST TUNING','4') end
         else
             f.text(1,3,d.gimbal and 'CALIBRATE AXES' or 'NO GIMBAL','4')
             f.text(1,4,'GX '..core.number(d.gimbal and d.gimbal[1],1))
@@ -97,7 +107,7 @@ function M.render(ui,core,flightCore,c,w,h,packet,sensorsFresh,radar,radarFresh,
         f.text(1,5,'HOLD ATTITUDE','b')
         f.text(1,6,'HOLD ALTITUDE','b')
         f.text(1,7,'RETURN HOME','b')
-        f.text(1,8,'MANUAL','b')
+        f.text(1,8,'ENABLE ASSIST','b')
     elseif page=='home' then
         f.text(1,2,'HERE / MARKER','b')
         for i,axis in ipairs({'x','y','z'}) do

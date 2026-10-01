@@ -13,11 +13,10 @@ if arguments[1]=='remap' then
 end
 local c=paths.module(dir,'jet_config')
 if os.getComputerID()==c.flightID then
-    -- Preview until the installer explicitly selects live in startup_mode.lua.
-    local mode=arguments[1] or 'preview'
-    local path=fs.combine(paths.root(dir),'startup_mode.lua')
-    if not arguments[1] and fs.exists(path) then mode=assert(loadfile(path))() end
-    assert(mode=='preview' or mode=='live' or (arguments[1] and (mode=='assist' or mode=='commission' or mode=='thruster')),'Invalid startup mode')
+    -- Normal startup always assists; explicit diagnostics remain available.
+    -- Legacy startup_mode.lua is preserved on disk but no longer selects flight mode.
+    local mode=arguments[1] or 'assist'
+    assert(mode=='preview' or mode=='live' or mode=='assist' or mode=='commission' or mode=='thruster','Invalid startup mode')
     if arguments[2] then shell.run(fs.combine(dir,'flight.lua'),mode,arguments[2])
     else shell.run(fs.combine(dir,'flight.lua'),mode) end
 elseif os.getComputerID()==c.hudID then

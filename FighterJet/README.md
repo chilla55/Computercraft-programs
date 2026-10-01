@@ -20,36 +20,36 @@ backs up an existing startup as `/startup.before-fighter.lua` (numbered if
 needed). It does not reboot or start flight during installation.
 
 Start with `/fighter/run`, or reboot manually when ready. Computer 5 starts
-in **preview**, computer 6 starts the HUD. Preview calculates demands,
-accepts configuration and sends status, but writes no flight actuators and
-does not automatically reboot the HUD. Explicit manual FC5 restart is still
-available on the HUD.
+in **ASSIST with thrust off**; computer 6 starts the HUD. Use the explicit
+`/fighter/run preview` command on 5 for no actuator writes. Normal startup now
+always selects assistance, including on installations with an old saved
+`startup_mode.lua`; that legacy file is retained but no longer selects the mode.
+Explicit diagnostic commands and calibrated `/fighter/run live` remain available.
 
 Persistent files live directly under `/fighter`:
 
 - `jet_config.lua`: calibration, peripheral names, flight tuning, recovery.
 - `hardware.lua`: mechanical wing mapping.
-- `startup_mode.lua`: `return "preview"` initially; set to `return "live"`
-  only after calibration. Both verification flags in config must also be true.
+- `startup_mode.lua`: legacy compatibility file, no longer used for mode selection.
 - `jet_state.a` / `.b`: saved home and cruise altitude.
 
 Updates preserve these files exactly. A first install also imports these
 files from an existing flat installation in the computer root, if present.
-That includes its selected startup mode. Defaults for a new release remain
+Startup selection follows the default described above. Defaults for a new release remain
 available inside `/fighter/releases/fighter-X.Y.Z/` for comparison; new
 configuration fields are not silently merged into your calibrated settings.
 
-## Active stabilization (0.1.4)
+## Default active stabilization and manual selector (0.1.5)
 
 Stop both programs while parked, then run `/fighter/update apply` on both computers.
 Start the HUD on **6** with `/fighter/run`, and the controller on **5** with:
 
 ```
-/fighter/run assist
+/fighter/run
 ```
 
-This explicit tuning mode works with the existing configuration and saved thruster
-remap. It leaves calibration flags and startup mode unchanged. The terminal says
+This default assisted mode works with the existing configuration and saved thruster
+remap. It leaves saved calibration flags unchanged. The terminal says
 **ASSIST - TUNING** and the HUD shows **ASSIST TUNING** on the artificial horizon.
 
 - W/S request pitch rotation, up to 25 degrees/second; A/D request bank rotation,
@@ -63,7 +63,21 @@ remap. It leaves calibration flags and startup mode unchanged. The terminal says
   control uses the wings; this mode adds no open-loop differential yaw thrust.
 - HUD loss does not stop assistance. Computer 5 retains its output watchdogs and
   may restart computer 6 under the existing recovery policy. Autopilot/configuration
-  requests are rejected during assist tuning; computer 5 is never auto-rebooted.
+  requests other than the assisted/direct control selector are rejected during assist tuning; computer 5 is never auto-rebooted.
+
+On the HUD **Flight Data** page (one PAGE press from the horizon):
+
+- Tap **DIRECT MANUAL**, then **CONFIRM MANUAL** within four seconds to disable
+  stabilization. The first tap sends no control command. Leaving the page or
+  losing/re-establishing the flight link cancels confirmation.
+- Tap **ENABLE ASSIST** to restore stabilization immediately, capturing the current
+  pitch and bank. Release flight keys before switching; active pilot input rejects
+  the request. Both transitions preserve the existing throttle setting.
+- Direct manual mode uses up to 40-degree mixed surface commands and the existing
+  direct differential-thrust mixer. Release centers the surfaces; attitude is not
+  held. The HUD labels it **DIRECT MANUAL** / **NO STABILIZER**.
+- Link loss preserves the selected mode. Restarting computer 5 always returns to
+  assisted control with thrust off. The selected direct mode is not persisted.
 
 The provisional profile uses pitch **+GZ**, bank **-GX**, based on the pilot's
 observations and commissioning traces. It overrides the old saved axis/gain values
@@ -256,7 +270,7 @@ as a physically level attitude.
 The HUD shows DIRECT TEST or THRUSTER TEST with **NO ATTITUDE HOLD**. Autopilot
 requests are rejected, HUD auto-reboot is disabled during tests, and Ctrl+T
 releases outputs. Tests do not become a saved startup mode. After testing,
-normal `/fighter/run` again uses your preserved preview/live startup selection.
+normal `/fighter/run` starts assisted control again.
 
 ## Differential thrust assist (0.1.2)
 
@@ -331,7 +345,7 @@ names remain mapped as the user reported; calibration flags stay unchanged.
 Computer 5 reads `linked_typewriter_1` directly. Any of these six keys,
 including opposing keys held together, overrides autopilot into MANUAL.
 MANUAL retains attitude assistance. Startup waits for all six keys to be
-released. Restarting computer 5 starts MANUAL with thrust off; saved home
+released. Restarting computer 5 starts ASSIST with thrust off; saved home
 and cruise altitude are restored, but an old autopilot engagement is not.
 
 Pitch and bank corrections mix simultaneously into both surfaces. The
@@ -420,7 +434,7 @@ characters are needed. Rendering uses changed rows at up to 4 Hz.
   IDs absent from the radar's category data. It cannot identify a category
   the radar does not supply without that mapping.
 - Autopilot offers altitude +/-10, APPLY ALTITUDE, HOLD ATTITUDE, HOLD ALTITUDE,
-  RETURN HOME, and MANUAL. Mode changes require acknowledgement from 5.
+  RETURN HOME, and ENABLE ASSIST. Mode changes require acknowledgement from 5.
 - System shows controller state and RESTART FC5. Tap twice within four seconds
   for a manual restart through the adjacent computer peripheral.
 - Navigation shows direct world position, horizontal home distance, course

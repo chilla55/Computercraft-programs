@@ -99,6 +99,7 @@ local function network()
                     if flightCore.position(m.home) then ui.home=flightCore.position(m.home) end
                     ui.message='Synced with FC5'
                 end
+                if changed or (status and m.revision~=status.revision) then ui.manualUntil=nil end
                 status,statusAt=m,os.clock()
                 if pending and type(m.ack)=='table' and m.ack.sequence==pending.sequence then
                     ui.message=(m.ack.ok and 'OK: ' or 'NO: ')..tostring(m.ack.message)
@@ -123,6 +124,7 @@ local function screen()
         if event=='timer' and name==timer then draw(); timer=os.startTimer(0.25)
         elseif event=='monitor_touch' and name==c.monitor then
             local w,h=monitor.getSize()
+            if not fresh() or not status.healthy then ui.manualUntil=nil end
             local command=cockpit.touch(ui,x,y,w,h,os.clock())
             ui.draftAltitude=flightCore.clamp(ui.draftAltitude,c.flight.minAltitude,c.flight.maxAltitude)
             if command then

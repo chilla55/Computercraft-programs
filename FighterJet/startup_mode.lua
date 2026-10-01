@@ -1,2 +1,2 @@
--- Change to "live" only after checking jet_config.lua calibration and ground tests.
-return "preview"
+-- Legacy file retained for installation compatibility; startup now defaults to assist.
+return "assist"
