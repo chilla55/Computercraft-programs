@@ -93,7 +93,11 @@ function M.render(ui,core,flightCore,c,w,h,packet,sensorsFresh,radar,radarFresh,
             end
             f.text(math.floor(cx)-1,math.floor(cy),'-+-','4')
             f.text(1,2,'P'..core.number(pitch,1)..' B'..core.number(bank,1))
-            if assist then f.text(1,h-2,assist.enabled==false and 'NO STABILIZER' or 'ASSIST TUNING','4') end
+            if assist then
+                local pitchSource=status.surfaces and status.surfaces.pitchControl
+                f.text(1,h-2,assist.enabled==false and 'NO STABILIZER' or
+                    (pitchSource=='THRUST' and 'P:THRUST R:WING' or 'ASSIST TUNING'),'4')
+            end
         else
             f.text(1,3,d.gimbal and 'CALIBRATE AXES' or 'NO GIMBAL','4')
             f.text(1,4,'GX '..core.number(d.gimbal and d.gimbal[1],1))

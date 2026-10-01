@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "version": "fighter-0.1.6",
-  "ref": "fighter-0.1.6",
+  "version": "fighter-0.1.7",
+  "ref": "fighter-0.1.7",
   "files": {
     "flight.lua": {
-      "size": 19005,
-      "sha256": "f74601aa835ac27e8d7f763425b7453ee9fdefe4b84b31893ea5d506e0839329"
+      "size": 19132,
+      "sha256": "ae9300ead03a840aa4986edebe0163199fb181f3ae52f7b70fc5e22d033e2907"
     },
     "flight_core.lua": {
-      "size": 13961,
-      "sha256": "7ab4caf093f14b116a4d797bd1de33e0b97b18787c364d3db6314412aa77cc52"
+      "size": 14338,
+      "sha256": "8d1c0a0bd835a505755efe68f2151df56671021f719f4a96e651d78237cb6b6a"
     },
     "hardware.lua": {
       "size": 1359,
@@ -44,8 +44,8 @@
       "sha256": "a068b7ae3bb36b17508076413650be97a63cf8cc7a6a0a14dadc84e81cd2683d"
     },
     "cockpit_ui.lua": {
-      "size": 7901,
-      "sha256": "cc046864eb06cce7b04c46159dbed2991317bac7d694cb12dcfeb60317fa6509"
+      "size": 8081,
+      "sha256": "fddf02fe564346fcba11873ccfc372bf01815996fe7f014ec9bfe8e79b3cfd25"
     },
     "startup.lua": {
       "size": 1365,

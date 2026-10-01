@@ -39,6 +39,29 @@ Startup selection follows the default described above. Defaults for a new releas
 available inside `/fighter/releases/fighter-X.Y.Z/` for comparison; new
 configuration fields are not silently merged into your calibrated settings.
 
+## Separate powered pitch and roll (0.1.7)
+
+In default assisted flight and confirmed direct manual control:
+
+| Thrust command | Pitch control | Roll control |
+|---|---|---|
+| On | Top/bottom differential thrust | Wings only |
+| Off (Shift) | Both wing surfaces together | Opposite wing surfaces |
+
+Pitch and roll no longer share wing travel while the engines are commanded on.
+Pitch authority allows up to a **60% reduction** of one top/bottom engine; left/right
+engines receive the base throttle. W/S and pitch stabilization set this differential;
+A/D and bank stabilization set the wing differential. Direct manual uses the same
+allocation without stabilization. Commissioning diagnostics retain their original
+mixing behavior.
+
+Switching thrust off restores wing pitch automatically without clearing attitude
+hold targets. Disabled vectoring or zero `assist.thrustAuthority` also retains wing
+pitch. Allocation follows the throttle command; the controller does not infer actual
+engine thrust/fuel availability. The HUD shows **P:THRUST R:WING** during powered
+assistance, and the trace's `pitchControl` column records **THRUST** or **WINGS**.
+The additional authority is software-tested and still needs aerodynamic validation.
+
 ## Stabilization corrections (0.1.6)
 
 The first assisted trace showed nose-up motion despite nose-down requests, followed
@@ -56,7 +79,7 @@ This release changes assisted control as follows:
 - Allow up to **60% reduction** of one pitch engine during assisted corrections,
   compared with the previous 25% maximum. `assist.thrustAuthority` controls this;
   it respects disabled vectoring and keeps configured engine mappings/signs.
-  Direct manual and commissioning retain their existing vectoring settings.
+  As of 0.1.7, direct manual uses the same powered allocation/authority; commissioning retains its existing settings.
 
 Existing installations receive these defaults without editing their configuration.
 Explicit `assist` overrides remain respected. The new tunable fields are
@@ -84,9 +107,9 @@ remap. It leaves saved calibration flags unchanged. The terminal says
 - Releasing either axis captures its current attitude within the assisted envelope. Feedback opposes further
   rotation and returns toward that captured angle. It does not automatically level
   the plane or hold altitude.
-- Wings mix pitch and roll continuously, with up to 40 degrees of deflection.
-  Space latches full base thrust; Shift turns all engines off. Pitch feedback also
-  modulates top/bottom thrust using assisted thrust authority (default 60%). Bank
+- Wings provide roll with up to 40 degrees of deflection, and also pitch when
+  thrust is off. Space latches full base thrust; Shift turns all engines off. Powered
+  pitch feedback modulates top/bottom thrust using assisted authority (default 60%). Bank
   control uses the wings; this mode adds no open-loop differential yaw thrust.
 - HUD loss does not stop assistance. Computer 5 retains its output watchdogs and
   may restart computer 6 under the existing recovery policy. Autopilot/configuration
@@ -100,8 +123,8 @@ On the HUD **Flight Data** page (one PAGE press from the horizon):
 - Tap **ENABLE ASSIST** to restore stabilization immediately, capturing the current
   pitch and bank. Release flight keys before switching; active pilot input rejects
   the request. Both transitions preserve the existing throttle setting.
-- Direct manual mode uses up to 40-degree mixed surface commands and the existing
-  direct differential-thrust mixer. Release centers the surfaces; attitude is not
+- Direct manual mode uses up to 40-degree surfaces and the powered pitch/roll
+  allocation described above. Release centers the surfaces; attitude is not
   held. The HUD labels it **DIRECT MANUAL** / **NO STABILIZER**.
 - Link loss preserves the selected mode. Restarting computer 5 always returns to
   assisted control with thrust off. The selected direct mode is not persisted.

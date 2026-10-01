@@ -95,6 +95,10 @@ local function run(mode,angle)
     _G.rednet={open=function() end,send=function(id,m)
         assert(id==6)
         latest=m
+        if assisting and m.surfaces and m.surfaces.throttle>0 then
+            assert(m.surfaces.pitchControl=='THRUST','Powered runtime lost thrust pitch allocation')
+            assert(m.surfaces.left+m.surfaces.right==0,'Powered pitch leaked into wing commands')
+        end
         if m.mode=='DIRECT MANUAL' then sawDirect=true end
         if sawDirect and m.mode=='ASSIST' then sawAssist=true end
         if m.mode=='HOLD' then acceptedMode=true end

@@ -17,7 +17,10 @@ local c,core,link,store,hw=module('jet_config'),module('flight_core'),module('je
 if assisting then c.flight=core.assistConfig(c.flight,c.assist) end
 local vectoring=core.vectorConfig(c.vectoring)
 local assistedVectoring=core.vectorConfig(c.vectoring)
-if assisting then assistedVectoring.authority=c.flight.thrustAuthority end
+if assisting then
+    assistedVectoring.authority=c.flight.thrustAuthority
+    c.flight.poweredPitch=vectoring.enabled and assistedVectoring.authority>0
+end
 -- Validate the mapping before touching hardware. Individual thruster tests bypass the mixer.
 if mode~='thruster' then core.thrustMix(c.thrusters,1,0,0,vectoring) end
 assert(os.getComputerID()==c.flightID,'Run flight on computer '..c.flightID)
@@ -119,7 +122,7 @@ local function thrust()
             target={}
             for index,name in ipairs(c.thrusters) do target[name]=index==pulse.selected and base or 0 end
         else
-            target=core.thrustMix(c.thrusters,base,desired.pitchAssist or 0,desired.yawAssist or 0,assisting and not state.direct and assistedVectoring or vectoring)
+            target=core.thrustMix(c.thrusters,base,desired.pitchAssist or 0,desired.yawAssist or 0,assisting and assistedVectoring or vectoring)
         end
         local jobs={}
         for _,name in ipairs(c.thrusters) do
@@ -208,7 +211,7 @@ local function control()
                 tostring(altitude),tostring(p.x),tostring(p.y),tostring(p.z)},',')
             for _,name in ipairs(c.thrusters) do line=line..','..tostring(state.appliedThrottles and state.appliedThrottles[name] or 0) end
             if assisting then
-                line=line..','..(state.direct and 'DIRECT' or 'ASSIST')
+                line=line..','..(state.direct and 'DIRECT' or 'ASSIST')..','..tostring(desired.pitchControl or 'WINGS')
                 for _,value in ipairs({sample.pitch,sample.bank,state.pitch or 0,state.bank or 0,
                     state.pitchRate or 0,state.bankRate or 0}) do line=line..','..tostring(value) end
                 for _,wing in ipairs(wings) do
@@ -242,7 +245,7 @@ local function flightTask()
             if recording then
                 local ok,file=pcall(fs.open,fs.combine(paths.root(dir),assisting and 'assist.csv' or 'commission.csv'),'w')
                 if ok and file then
-                    local header='seconds,gx,gz,commonKey,differentialKey,leftSurface,rightSurface,throttle,thrusterIndex,altitude,x,y,z,'..table.concat(c.thrusters,',')..(assisting and ',controlMode,pitch,bank,targetPitch,targetBank,pitchRate,bankRate,rightMeasured,rightAge,leftMeasured,leftAge' or '')
+                    local header='seconds,gx,gz,commonKey,differentialKey,leftSurface,rightSurface,throttle,thrusterIndex,altitude,x,y,z,'..table.concat(c.thrusters,',')..(assisting and ',controlMode,pitchControl,pitch,bank,targetPitch,targetBank,pitchRate,bankRate,rightMeasured,rightAge,leftMeasured,leftAge' or '')
                     local written=pcall(function()
                         file.writeLine(header)
                         file.flush()
@@ -284,7 +287,7 @@ local function statusSender()
             distance=state.distance,course=sample and sample.course,throttle=state.throttle,
             surfaces=desired,warning=state.warning,ack=ack,restarts=watchdog.attempts,
             assist=assisting and {profile=c.flight,enabled=not state.direct} or nil,calibrated=c.flight.calibrated,engineOutputs=state.appliedThrottles,
-            vectoring=mode~='thruster' and {enabled=vectoring.enabled,authority=assisting and not state.direct and assistedVectoring.authority or vectoring.authority} or nil,commission=commissioning and {kind=mode,degrees=degrees,
+            vectoring=mode~='thruster' and {enabled=vectoring.enabled,authority=assisting and assistedVectoring.authority or vectoring.authority} or nil,commission=commissioning and {kind=mode,degrees=degrees,
                 thruster=c.thrusters[pulse.selected],throttle=state.appliedThrottle or 0,raw=sample and sample.raw} or nil}
         pcall(rednet.send,c.hudID,m,link.protocol)
         sleep(0.5)
@@ -316,7 +319,7 @@ local function screen()
         elseif mode=='commission' then print('W/S common A/D differential; NO STABILIZATION'); print('Thrust assist '..(vectoring.enabled and (vectoring.authority*100)..'%' or 'OFF')); print('Space FULL THRUST; Shift OFF; release wings = neutral')
         elseif assisting then
             print(state.direct and 'Direct W/S pitch A/D bank; release = neutral' or 'W/S pitch rate A/D bank rate; release = attitude hold')
-            print('Space ON Shift OFF; flight trace enabled')
+            print('Pitch: '..(desired.pitchControl or 'WINGS')..'; Space ON Shift OFF')
         else print('W/S pitch A/D bank Space ON Shift OFF') end
         print('HUD '..(lastHUD and os.clock()-lastHUD<c.linkTimeout and 'CONNECTED' or 'OFFLINE'))
         print('Ctrl+T stops this controller')

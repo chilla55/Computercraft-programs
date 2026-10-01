@@ -45,6 +45,7 @@ function M.assistConfig(base, custom)
     assert(c.pitchEnvelope>0 and c.pitchEnvelope<85 and c.bankEnvelope>0 and c.bankEnvelope<85,'Invalid assist envelope')
     assert(c.envelopeKp>0 and c.envelopeKp<=10,'Invalid envelope gain')
     assert(c.thrustAuthority>=0 and c.thrustAuthority<=1,'Invalid assist thrust authority')
+    c.poweredPitch=c.thrustAuthority>0
     c.projectedPitch=true
     c.rateControl=true
     return c
@@ -59,14 +60,17 @@ function M.input(codes)
         any=held[87] or held[83] or held[65] or held[68] or held[32] or held[340] or false}
 end
 -- Direct commissioning demand: mechanical directions, no attitude feedback.
-function M.direct(input, degrees, throttle)
+function M.direct(input, degrees, throttle, poweredPitch)
     if input.off then throttle=0 elseif input.on then throttle=1 end
     -- Pilot observation: left-UP/right-DOWN banks left on this aircraft.
-    local left=(input.pitch-input.bank)*degrees
-    local right=(input.pitch+input.bank)*degrees
+    local useThrust=poweredPitch and throttle>0
+    local wingPitch=useThrust and 0 or input.pitch
+    local left=(wingPitch-input.bank)*degrees
+    local right=(wingPitch+input.bank)*degrees
     local scale=degrees>0 and math.max(1,math.abs(left)/degrees,math.abs(right)/degrees) or 1
     local function rounded(v) return math.floor(math.abs(v)/scale+0.5)*(v<0 and -1 or 1) end
-    return {left=rounded(left),right=rounded(right),throttle=throttle,pitchAssist=input.pitch,yawAssist=input.bank}
+    return {left=rounded(left),right=rounded(right),throttle=throttle,pitchAssist=input.pitch,yawAssist=poweredPitch and 0 or input.bank,
+        pitchControl=useThrust and 'THRUST' or 'WINGS'}
 end
 -- Forward-facing diamond layout, viewed from behind toward the nose.
 -- This changes pitch/yaw torque by reducing opposing engines; it cannot produce axial roll.
@@ -171,7 +175,7 @@ end
 function M.step(s, a, input, dt, c)
     assert(M.finite(a.pitch) and M.finite(a.bank), 'Invalid attitude')
     if c.rateControl and s.direct then
-        local demand=M.direct(input,c.maxSurface,s.throttle)
+        local demand=M.direct(input,c.maxSurface,s.throttle,c.poweredPitch)
         s.throttle=demand.throttle
         return demand
     end
@@ -233,7 +237,8 @@ function M.step(s, a, input, dt, c)
         if input.pitch~=0 then pitchEffort=c.pitchKd*(rateDemand(a.pitch,input.pitch,c.pitchEnvelope,c.pitchRateLimit)-s.pitchRate) end
         if input.bank~=0 then bankEffort=c.bankKd*(rateDemand(a.bank,input.bank,c.bankEnvelope,c.bankRateLimit)-s.bankRate) end
     end
-    local common=pitchEffort*c.pitchSurfaceSign
+    local useThrust=c.rateControl and c.poweredPitch and s.throttle>0
+    local common=useThrust and 0 or pitchEffort*c.pitchSurfaceSign
     local differential=bankEffort*c.bankSurfaceSign
     if c.rateControl then
         -- Preserve collective pitch authority when roll saturates the shared surfaces.
@@ -244,7 +249,7 @@ function M.step(s, a, input, dt, c)
     local left,right=common+differential,common-differential
     local scale=math.max(1,math.abs(left)/c.maxSurface,math.abs(right)/c.maxSurface)
     local function round(v) return math.floor(math.abs(v)/scale+0.5)*(v<0 and -1 or 1) end
-    return {left=round(left),right=round(right),throttle=s.throttle,
+    return {left=round(left),right=round(right),throttle=s.throttle,pitchControl=useThrust and 'THRUST' or 'WINGS',
         pitchAssist=M.clamp(pitchEffort/c.maxSurface,-1,1),
         yawAssist=c.rateControl and 0 or s.mode=='HOME' and M.clamp(s.bank/c.maxAPBank,-1,1) or input.bank}
 end
