@@ -4,6 +4,14 @@
 capacity, and a horizontal fill gauge with a centered **percentage full** label.
 It runs on a CC: Tweaked computer terminal or monitor and only reads storage.
 
+The top row displays the Minecraft world day and 24-hour in-game time, for
+example **Day 123 14:30**. Compact displays prioritize the clock over the title.
+The computer control panel also shows the clock. It refreshes every second,
+independently of storage scans, including while a scan is loading or retrying.
+The day is the world day from `os.day("ingame")`, rather than a calendar date;
+the time comes from `os.time("ingame")`.
+[CC: Tweaked time API](https://tweaked.cc/module/os.html#v:time).
+
 ## Installer and automatic updates
 
 After the `Storage` files are published to this repository's `main` branch, run

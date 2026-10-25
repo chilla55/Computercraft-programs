@@ -1,5 +1,14 @@
 local m = dofile('Storage/stock_monitor.lua')
 local function eq(a,b) assert(a == b, tostring(a)..' ~= '..tostring(b)) end
+local gameDay, gameTime = 123, 14.5
+os.day = function(locale) eq(locale, 'ingame'); return gameDay end
+os.time = function(locale) eq(locale, 'ingame'); return gameTime end
+eq(m.gameDateTime(), 'Day 123 14:30')
+gameTime = 23 + 59 / 60 + 0.001
+eq(m.gameDateTime(), 'Day 123 23:59')
+gameDay, gameTime = 124, 0
+eq(m.gameDateTime(), 'Day 124 00:00')
+gameDay, gameTime = 123, 14.5
 local function vault(slots, items, limit)
     return {size=function() return slots end, list=function() return items end,
         getItemLimit=function(i) return type(limit)=='table' and limit[i] or limit end}
@@ -195,7 +204,7 @@ m.draw(compact,{current=5000,capacity=10000,ratio=0.5,occupied=100,slots=200,
         {name='minecraft:gold_ingot',minute=-5,five=50},
         {name='minecraft:copper_ingot',minute=2,five=20},
     }}},nil,false)
-eq(compactLines[1],'VAULT STORAGE')
+eq(compactLines[1],'VAULT STORAGE   Day 123 14:30')
 eq(compactLines[2],'Non-vault: ~1,000')
 eq(compactLines[3],'Vault items: 5,000')
 eq(compactLines[4],'Vault max: 10,000')
@@ -326,7 +335,7 @@ for _,dims in ipairs({{29,12},{51,19},{26,10}}) do
     local target,lines=screen(dims[1],dims[2])
     m.draw(target,network,nil,false)
     local text=table.concat(lines,'\n')
-    assert(text:find('STOCK NETWORK HISTORY',1,true))
+    assert(lines[1]:find('Day 123 14:30',1,true))
     assert(text:find('Network: 100',1,true))
     assert(not text:find('Vault max',1,true)); assert(not text:find('Non-vault:',1,true))
     assert(not text:find('%% full')); assert(not text:find('Show summary',1,true))
@@ -341,3 +350,22 @@ local historyConsole,historyLines=screen(51,19)
 m.drawConsole(historyConsole,network,nil,historyOnlyConfig,'Ready')
 eq(historyLines[3],'Mode: network history'); eq(historyLines[5],'Network items: 100')
 print('History-only sampling, failures, layouts, paging and control-panel checks passed')
+
+-- Clock stays visible in every view, on errors/loading, and with old worlds.
+for _,day in ipairs({0,123,123456789}) do
+    gameDay = day
+    for _,dims in ipairs({{26,10},{29,12},{51,19}}) do
+        local target,lines=screen(dims[1],dims[2])
+        for _,view in ipairs({false,true}) do
+            m.draw(target,data,nil,view)
+            eq(lines[1]:sub(-#m.gameDateTime()),m.gameDateTime())
+            m.draw(target,nil,'Offline',view)
+            eq(lines[1]:sub(-#m.gameDateTime()),m.gameDateTime())
+        end
+        m.loading(target,'Reading slots')
+        eq(lines[1]:sub(-#m.gameDateTime()),m.gameDateTime())
+        m.drawConsole(target,nil,nil,{vaults={'a'}},'Ready')
+        eq(lines[2],m.gameDateTime())
+    end
+end
+print('In-game clock: midnight, world days, compact/full views, loading and failures passed')

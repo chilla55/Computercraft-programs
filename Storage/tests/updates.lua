@@ -216,7 +216,12 @@ peripheral={wrap=function(name) return peripheralDevices[name] end,
     hasType=function(name,kind) return name=='display' and kind=='monitor' end}
 files[path..'.cfg']=serialize({vaults={'a'},ticker='ticker',monitor='display',interval=5})
 local timerCount,manualCount,capacityReads=0,0,0
-os.startTimer=function(seconds) eq(seconds,5); timerCount=timerCount+1; return timerCount end
+os.day=function(locale) eq(locale,'ingame'); return 123 end
+os.time=function(locale) eq(locale,'ingame'); return 14.5 end
+os.startTimer=function(seconds)
+    if seconds == 1 then return -1 end -- independent UI clock
+    eq(seconds,5); timerCount=timerCount+1; return timerCount
+end
 os.cancelTimer=function() end
 local pending={}
 os.queueEvent=function(...) pending[#pending+1]={...} end
@@ -226,7 +231,7 @@ peripheralDevices.a.getItemLimit=function()
     os.pullEvent('capacity_ready') -- simulate slow server-side inventory call
     return 64
 end
-local scripted={{'char','u'},{'monitor_resize','display'},{'capacity_ready'},
+local scripted={{'char','u'},{'monitor_resize','display'},{'timer',-1},{'capacity_ready'},
     {'monitor_touch','other',20,19},{'monitor_touch','display',1,19},
     {'monitor_touch','display',20,19},{'char','c'},{'capacity_ready'},{'timer',2},{'char','q'}}
 parallel.waitForAny=function(...)

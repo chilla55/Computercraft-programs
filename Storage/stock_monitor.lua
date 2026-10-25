@@ -1,7 +1,7 @@
--- stock-monitor-version: 1.0.9
+-- stock-monitor-version: 1.0.10
 -- Create Stock Ticker + Item Vault dashboard for CC: Tweaked.
 -- Run stock_monitor --configure to choose peripherals again.
-local M = { version = "1.0.9" }
+local M = { version = "1.0.10" }
 
 local function number(value, label)
     assert(type(value) == "number" and value >= 0 and value < math.huge
@@ -290,6 +290,23 @@ function M.format(value)
     return digits:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
 end
 
+function M.gameDateTime()
+    local day = os.day("ingame")
+    local minutes = math.floor(os.time("ingame") * 60) % 1440
+    return string.format("Day %d %02d:%02d", day, math.floor(minutes / 60), minutes % 60)
+end
+
+function M.monitorHeading(target, title)
+    local w = target.getSize()
+    local clock = M.gameDateTime()
+    -- Prefer the complete clock over a clipped title on compact monitors.
+    if #title + #clock + 1 > w then title = "" end
+    clock = clock:sub(1, w)
+    target.setCursorPos(1, 1)
+    target.setTextColor(colors.cyan)
+    target.write(title .. string.rep(" ", w - #title - #clock) .. clock)
+end
+
 -- Do not toggle between scales on each redraw: setTextScale queues resize
 -- events, so toggling it causes a self-sustaining refresh/clear loop.
 function M.fitMonitor(target)
@@ -303,8 +320,7 @@ function M.loading(target, message)
     target.setBackgroundColor(colors.black)
     target.setTextColor(colors.white)
     target.clear()
-    target.setCursorPos(1, 1)
-    target.write(("READING STORAGE"):sub(1, w))
+    M.monitorHeading(target, "READING STORAGE")
     if h >= 3 then
         target.setCursorPos(1, 3)
         target.write(message:sub(1, w))
@@ -407,7 +423,7 @@ function M.draw(target, data, problem, trendView, listState)
         return
     end
     if problem or trendView or h < 11 or h >= 15 then
-        line(1, "STOCK NETWORK / VAULTS", colors.cyan)
+        M.monitorHeading(target, "STOCK NETWORK / VAULTS")
     end
     if problem then
         line(3, "VAULT DATA UNAVAILABLE", colors.red)
@@ -480,7 +496,7 @@ function M.draw(target, data, problem, trendView, listState)
     end
     if trendView then
         if data.historyOnly then
-            line(1, "STOCK NETWORK HISTORY", colors.cyan)
+            M.monitorHeading(target, "STOCK NETWORK HISTORY")
             if data.historyError then line(2, "History save failed", colors.orange)
             else line(2, "Network: " .. (data.network and M.format(data.network) or "unavailable")) end
         else
@@ -494,8 +510,7 @@ function M.draw(target, data, problem, trendView, listState)
     if h >= 11 and h < 15 then
         local color = data.ratio >= 0.9 and colors.red
             or data.ratio >= 0.75 and colors.orange or colors.lime
-        if data.historyError then line(1, "History save failed", colors.orange)
-        else line(1, "VAULT STORAGE", colors.cyan) end
+        M.monitorHeading(target, data.historyError and "History save failed" or "VAULT STORAGE")
         line(2, "Non-vault: " .. (data.nonVault and ("~" .. M.format(data.nonVault)) or "unavailable"))
         line(3, "Vault items: " .. M.format(data.current))
         line(4, "Vault max: " .. M.format(data.capacity))
@@ -551,6 +566,7 @@ function M.drawConsole(target, data, problem, config, status, historyError)
         target.write(text:sub(1, w))
     end
     M.terminalHeading(target, "STORAGE CONTROL PANEL")
+    line(2, M.gameDateTime(), colors.lightGray)
     line(3, #config.vaults == 0 and "Mode: network history" or ("Configured vaults: " .. #config.vaults))
     line(4, "Ticker: " .. (config.ticker or "none (vault totals)"))
     if data and #config.vaults == 0 then
@@ -778,16 +794,21 @@ function M.main(args, services)
                 end
             else
                 draw(terminal)
-                M.terminalHeading(terminal, #config.vaults == 0 and "STOCK HISTORY" or "VAULT STORAGE")
+                M.terminalHeading(terminal, M.gameDateTime())
                 local w, h = terminal.getSize()
                 terminal.setCursorPos(1, h)
                 terminal.write((#config.vaults == 0 and "C: setup U: update Q: quit" or "C: setup U: update N: view Q: quit"):sub(1, w))
             end
         end
         render()
+        local clockTimer = os.startTimer(1)
         while true do
             local event, value = os.pullEvent()
-            if event == "char" then
+            if event == "timer" and value == clockTimer then
+                clockTimer = os.startTimer(1)
+                notify()
+                render()
+            elseif event == "char" then
                 local key = value:lower()
                 if key == "q" then return end
                 if key == "u" then
