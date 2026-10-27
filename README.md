@@ -3,6 +3,10 @@
 The [Create stock network monitor](Storage/README.md) displays network item counts,
 vault capacity, and a live fill gauge on a monitor or computer terminal.
 
+The [custom series transformer controller](Powerplant/custom_transformer/README.md)
+regulates two 40 A PowergridAddon cabinets followed by a 200 A cabinet to 240 V,
+with calculated ratios, staged startup and cooling-aware winding current checks.
+
 The new [distributed transformer system](Powerplant/distributed/README.md) separates the UI/configuration master, variac regulation and protection/breaker control across three computers. All can trip; only protection can close breakers. It includes ender-modem communication and verified, staged GitHub updates.
 
 The previous standalone regulator is backed up on [`backup/standalone-regulator-v18`](https://github.com/chilla55/Computercraft-programs/tree/backup/standalone-regulator-v18), commit `929f894`. Its [setup guide](Powerplant/regulator/SETUP.md) and the existing [plant-wide controller](Powerplant/controller/SETUP.md) remain available for reference and regression tests.
