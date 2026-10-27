@@ -13,7 +13,9 @@ local function fixture()
             local i = index(name)
             f.commands[#f.commands + 1] = {i = i, method = method, value = value}
             if f.missing == i then error("peripheral offline") end
-            if method == "setEnabled" then f.stages[i].enabled = value
+            if method == "setEnabled" then
+                f.stages[i].enabled = value
+                if value and (f.stages[i].temperature or 25) < 60 then f.stages[i].tripped = false end
             elseif method == "setRatio" then f.stages[i].requested = value
             else error("unsupported hardware write: " .. method) end
         end,
@@ -160,8 +162,43 @@ assert(#f.commands == writes)
 assert(f.start())
 for _ = 1, 60 do local ok, why = f.step(); assert(ok, why) end
 assert(f.control.state.phase == "running")
+-- Unlimited recovery retries; no fourth-attempt permanent latch.
+f = fixture(); f.run()
+f.source = 0
+for attempt = 1, 6 do
+    local ok, why = f.step()
+    assert(not ok)
+    f.control.fault(why, f.time)
+    assert(f.control.state.retries == attempt and f.control.state.retryAt)
+    local writesBefore = #f.commands
+    for _ = 1, 19 do assert(f.step()) end
+    assert(#f.commands == writesBefore, "retried before delay expired")
+end
+f.source = 264001
+for _ = 1, 100 do local ok, why = f.step(); assert(ok, why) end
+assert(f.control.state.phase == "running")
+-- Thermal reset is deferred until cool and performed only during normal enable.
+f = fixture(); f.run(); f.stages[2].temperature = 100; f.stages[2].tripped = true
+local ok, why = f.step(); assert(not ok); f.control.fault(why, f.time)
+for _ = 1, 20 do
+    local pass, errorText = f.step()
+    if not pass then f.control.fault(errorText, f.time) end
+end
+assert(not f.stages[2].enabled and f.stages[2].tripped)
+f.stages[2].temperature = 55
+for _ = 1, 120 do local pass, errorText = f.step(); assert(pass, errorText) end
+assert(f.control.state.phase == "running" and not f.stages[2].tripped)
+-- Operator stop cancels an already scheduled retry.
+f.control.fault("test", f.time)
+f.control.stop("Operator stop")
+assert(not f.control.state.retryAt)
+local count = #f.commands
+for _ = 1, 40 do assert(f.step()) end
+assert(#f.commands == count and f.control.state.phase == "stopped")
 local c = M.defaults(); c.stages[2].name = c.stages[1].name
 assert(not pcall(M.validate, c))
 c = M.defaults(); c.stages[3].uncooled = 300
 assert(not pcall(M.validate, c))
+c = M.defaults(); c.resetTemperature = nil; c.retrySeconds = nil
+M.validate(c); assert(c.resetTemperature == 60 and c.retrySeconds == 5)
 print("Custom transformer controller: staged startup, feedback, cooling/current limits, faults and shutdown passed")

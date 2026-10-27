@@ -65,7 +65,7 @@ local function run(mode)
             reads = reads + 1
             env.os.pullEvent("native")
             if mode == "terminate" and reads == 3 then error("Terminated", 0) end
-            local out, voltage = {}, 264001
+            local out, voltage = {}, (mode == "retry" and reads >= 3 and reads <= 8) and 0 or 264001
             for i, s in ipairs(states) do
                 local r = {inputVoltage = voltage, ratio = s.ratio, inputCurrent = 0,
                     outputCurrent = 0, temperature = 25, status = s.enabled and "running" or "disabled",
@@ -86,7 +86,7 @@ local function run(mode)
         if coroutine.status(root) == "dead" then break end
         clock = clock + 50
         local event = {filter or (step % 2 == 0 and "timer" or "native")}
-        if not filter and reads >= 3 and not injectedQuit then
+        if not filter and reads >= 3 and not injectedQuit and (mode ~= "retry" or reads > 12) then
             if mode == "restart" and not stoppedOnce then
                 event = {"char", "x"}; stoppedOnce = true
             elseif mode == "restart" and stoppedOnce and not startedAgain and not states[1].enabled then
@@ -106,7 +106,8 @@ local function run(mode)
     assert(not states[1].enabled and not states[3].enabled)
     if mode ~= "failed_stop" then assert(not states[2].enabled) end
     if mode == "restart" then assert(stoppedOnce and startedAgain) end
+    if mode == "retry" then assert(reads > 12, "automatic retries failed to recover from source loss") end
     return writes
 end
-for _, mode in ipairs({"quit", "restart", "terminate", "failed_stop"}) do run(mode) end
+for _, mode in ipairs({"quit", "restart", "terminate", "failed_stop", "retry"}) do run(mode) end
 print("Custom transformer runtime: quit during native calls, stop/restart, termination and failed shutdown passed")

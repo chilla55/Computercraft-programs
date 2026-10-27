@@ -1,6 +1,6 @@
--- Custom series transformer controller v1.0.0 (CC: Tweaked).
+-- Custom series transformer controller v1.0.1 (CC: Tweaked).
 -- Run: controller.lua run | configure | status
-local M = { version = "1.0.0" }
+local M = { version = "1.0.1" }
 local function finite(n) return type(n) == "number" and n == n and math.abs(n) < math.huge end
 local function clamp(n, low, high) return math.max(low, math.min(high, n)) end
 local function copy(value)
@@ -12,6 +12,7 @@ function M.defaults()
         maximumInput = 316802, minimumRatio = 0.01, maximumRatio = 1,
         finalRatioReserve = 1.1,
         accuracy = 2, overvoltage = 264, tripTemperature = 95,
+        resetTemperature = 60, retrySeconds = 5,
         timeout = 45, coolingSamples = 3, stableSamples = 3, pollSeconds = 0.25,
         stages = {
             { name = "powergrid_addon_variac_0", uncooled = 10, cooled = 40 },
@@ -21,9 +22,12 @@ function M.defaults()
 end
 function M.validate(c)
     assert(type(c) == "table" and c.schema == 1, "Invalid configuration schema")
+    -- Existing 1.0.0 configurations acquire the new recovery settings.
+    if c.resetTemperature == nil then c.resetTemperature = 60 end
+    if c.retrySeconds == nil then c.retrySeconds = 5 end
     for _, key in ipairs({"target", "nominalInput", "minimumInput", "maximumInput",
         "minimumRatio", "maximumRatio", "finalRatioReserve", "accuracy", "overvoltage", "tripTemperature",
-        "timeout", "coolingSamples", "stableSamples", "pollSeconds"}) do
+        "timeout", "coolingSamples", "stableSamples", "pollSeconds", "resetTemperature", "retrySeconds"}) do
         assert(finite(c[key]) and c[key] > 0, "Invalid configuration: " .. key)
     end
     assert(c.minimumRatio < c.maximumRatio and c.maximumRatio <= 1, "Require step-down ratios: 0 < minimum < maximum <= 1")
@@ -32,6 +36,7 @@ function M.validate(c)
     assert(c.accuracy < c.target and c.overvoltage > c.target + c.accuracy, "Invalid output voltage limits")
     assert(c.coolingSamples % 1 == 0 and c.stableSamples % 1 == 0, "Sample counts must be integers")
     assert(c.pollSeconds >= 0.05 and c.timeout >= 1, "Invalid timing")
+    assert(c.resetTemperature < c.tripTemperature and c.retrySeconds >= 1, "Invalid recovery settings")
     assert(type(c.stages) == "table" and #c.stages == 3, "Configure exactly three series stages")
     local seen = {}
     for _, stage in ipairs(c.stages) do
@@ -80,6 +85,7 @@ function M.new(config, io)
     local function set(i, method, value) io.call(c.stages[i].name, method, value) end
     function api.stop(message)
         s.phase, s.enabled, s.message = "stopped", 0, message or "Stopped"
+        s.retryAt = nil
         s.cool, s.limits = {0, 0, 0}, {}
         local errors = {}
         -- Try every stage even when one has disappeared or rejects a command.
@@ -89,6 +95,11 @@ function M.new(config, io)
         end
         s.stopErrors = errors
         return #errors == 0, table.concat(errors, " | ")
+    end
+    function api.fault(message, now)
+        api.stop("FAULT: " .. tostring(message))
+        s.retries = (s.retries or 0) + 1
+        s.retryAt = now + c.retrySeconds
     end
     local function limit(i, reading)
         local cooling, stage = reading.cooling, c.stages[i]
@@ -124,7 +135,12 @@ function M.new(config, io)
             end
             assert(cooling.capacity >= 0 and cooling.airflow >= 0 and cooling.airflow <= 1
                 and cooling.speed >= 0 and cooling.speed <= 1, prefix .. "invalid cooling capacity/airflow")
-            assert(not cooling.tripped and r.status ~= "thermal_trip", prefix .. "native thermal trip; reset hardware before starting")
+            local nativeTrip = cooling.tripped or r.status == "thermal_trip"
+            -- A disabled, cool cabinet can be reset by its normal sequential
+            -- enable after preset verification. Never pulse-enable to reset.
+            assert(not nativeTrip or (i > s.enabled
+                and math.max(r.temperature, cooling.temperature) < c.resetTemperature),
+                prefix .. "native thermal trip; waiting to cool below " .. c.resetTemperature .. " C")
             assert(math.max(r.temperature, cooling.temperature) < c.tripTemperature, prefix .. "temperature limit")
             s.limits[i] = limit(i, r)
             assert(math.abs(r.inputCurrent) <= s.limits[i] + 1e-6, prefix .. "input current exceeds " .. s.limits[i] .. " A")
@@ -156,6 +172,10 @@ function M.new(config, io)
         assert(stopped, "Could not disable all stages: " .. why)
         s.commanded, s.stable, s.trim = {}, 0, 0
         local readings = read()
+        for i, r in ipairs(readings) do
+            assert(math.max(r.temperature, r.cooling.temperature) < c.resetTemperature,
+                c.stages[i].name .. ": waiting to cool below " .. c.resetTemperature .. " C before restart")
+        end
         s.plan = M.plan(c, readings[1].inputVoltage)
         -- Disable all outputs before requesting ratios. Actual ratios ramp
         -- asynchronously, including while disabled; verify before any enable.
@@ -183,12 +203,17 @@ function M.new(config, io)
         ratio(3, clamp(base + s.trim, c.minimumRatio, c.maximumRatio))
     end
     function api.tick(now)
-        if s.phase == "stopped" then return end
+        if s.phase == "stopped" then
+            if s.retryAt and now >= s.retryAt then api.start(now) end
+            return
+        end
         local r = read()
         assert(now <= s.deadline or s.phase == "running", "Startup/regulation timed out")
         if s.phase == "preset" then
             local disabled = true
-            for i = 1, 3 do if r[i].status ~= "disabled" then disabled = false end end
+            for i = 1, 3 do
+                if r[i].status ~= "disabled" and r[i].status ~= "thermal_trip" then disabled = false end
+            end
             if disabled and settled(r, 3) then
                 set(1, "setEnabled", true); s.enabled, s.phase, s.stable = 1, "starting", 0
                 s.deadline = now + c.timeout
@@ -299,6 +324,9 @@ function M.main(args)
         line("CUSTOM TRANSFORMER v" .. M.version .. " / " .. s.phase)
         line("Target " .. c.target .. " V | series 0 -> 1 -> 2")
         line(s.message)
+        if s.retryAt then
+            line(string.format("Auto retry %d in %.0fs", s.retries, math.max(0, s.retryAt - now())))
+        end
         if s.plan then
             line(string.format("Plan %.5f / %.5f / %.5f", table.unpack(s.plan.ratios)))
         end
@@ -334,7 +362,7 @@ function M.main(args)
             end)
             if not ok then
                 if why == "Terminated" then error(why, 0) end
-                control.stop("FAULT: " .. tostring(why))
+                control.fault(why, now())
             end
             draw()
             sleep(c.pollSeconds)

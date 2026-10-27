@@ -28,6 +28,20 @@ wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powe
 transformer.lua run
 ```
 
+For automatic startup on boot, also download and run the startup installer:
+
+```text
+wget https://raw.githubusercontent.com/chilla55/Computercraft-programs/main/Powerplant/custom_transformer/autostart.lua transformer_autostart.lua
+transformer_autostart.lua install transformer.lua
+```
+
+It creates `/startup/custom_transformer.lua`, pointing to the controller's
+absolute path, and preserves other startup entries. It can update its own entry
+but refuses to overwrite a different program's entry or a file named `/startup`.
+The optional controller path supports installation in a subdirectory. On the
+next boot it runs the controller; Q exits until the next boot. To remove this
+autostart, delete only `/startup/custom_transformer.lua`.
+
 The single file contains the controller, planner and terminal display. It creates
 `transformer.lua.cfg` beside the program on first launch, with the names and
 manual ratings above. To change them or any voltage/timing limit:
@@ -41,13 +55,24 @@ This opens the configuration in the in-game editor; save, close and launch
 `transformer.lua status` prints raw telemetry without changing hardware state.
 Stop any other controller for this chain before running this one.
 
-`run` starts the chain. **X** disables all stages and stays stopped; **S** makes
-an explicit new start attempt; **Q** disables all stages and quits. Faults stay
-stopped until S or another explicit run. The program attempts to disable every
+`run` starts the chain. **X** disables all stages and pauses automatic recovery;
+**S** makes a new start attempt and resumes recovery; **Q** disables all stages
+and quits. Faults automatically retry after five seconds, without any attempt
+limit or permanent fault latch. The program attempts to disable every
 configured stage, starting at the output, even if another stage cannot be
 reached. A failed shutdown command is reported. Ctrl+T and ordinary Lua failures
-inside the control runtime also run shutdown cleanup. No startup entry or
-automatic updater is installed.
+inside the control runtime also run shutdown cleanup. A termination exits rather
+than retrying. The controller itself installs no startup entry or updater; the
+separate installer above enables boot startup.
+
+Recovery always disables the chain and repeats ratio calculation, preset
+verification and sequential enabling. Missing peripherals, loss of source power
+and continuing faults keep it retrying. `retrySeconds` changes the delay (minimum
+one second). Restart waits until every cabinet is below `resetTemperature`
+(60 C by default), below the software trip temperature. This avoids immediately
+reconnecting a still-hot transformer. Existing version 1.0.0 configurations use
+the new recovery defaults automatically; these two fields can be added manually
+to change them. Invalid configuration errors still require a configuration fix.
 
 ## Ratio planning and startup
 
@@ -108,9 +133,11 @@ The applied limit is always the **lower** of that manual rating and the reported
 limit. Both input and output winding currents are checked by magnitude. Excess
 current trips the chain; the program does **not** call `setCurrentLimit` or
 `setTargetVoltage`. The addon advertises these methods on transformers, but the
-local implementation rejects them for this hardware. Native thermal trips
-must be cleared on the hardware before restarting; the controller does not
-repeatedly call `setEnabled(true)` to reset a trip.
+local implementation rejects them for this hardware. Once cool, native thermal
+trips are cleared through `setEnabled(true)` during the verified sequential
+startup. The controller never pulse-enables a winding just to clear its trip.
+If the server's own reset threshold is lower than the configured reset
+temperature, a continuing native trip causes another shutdown and retry.
 
 Reads are batched through CC's parallel API, followed by a 0.25-second polling
 delay. They are not an atomic electrical snapshot. Software shutdown is reactive
@@ -181,8 +208,10 @@ state or readings during commissioning.
 lua Powerplant/custom_transformer/tests/probe.lua
 lua Powerplant/custom_transformer/tests/controller.lua
 lua Powerplant/custom_transformer/tests/runtime.lua
+lua Powerplant/custom_transformer/tests/autostart.lua
 ```
 
 The simulation checks calculation, staged startup, source drift and small
 winding losses, cooling transitions, both winding current limits, faults and
-best-effort shutdown. It does not reproduce the Minecraft electrical solver.
+best-effort shutdown, unlimited delayed recovery, thermal resets, manual pause
+and startup installation. It does not reproduce the Minecraft electrical solver.
